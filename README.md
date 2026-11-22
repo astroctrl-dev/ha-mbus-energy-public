@@ -1,6 +1,6 @@
 # M-Bus energimåling i Home Assistant
 
-Åpen kildekode og installasjonsveiledning for en M-Bus-leser med MQTT Discovery. Appen søker primæradresser fortløpende, lar deg stoppe søket når en ønsket måler er funnet, og lar deg legge til flere identifiserte målere. Hver måler får egen enhet i Home Assistant.
+Åpen kildekode og installasjonsveiledning for en M-Bus-leser med MQTT Discovery. Appen søker primæradresser fortløpende, lar deg stoppe søket når en ønsket måler er funnet, og lar deg legge til flere identifiserte målere. Hver støttet måler får egen enhet i Home Assistant. Denne utgaven validerer telegram fra Landis+Gyr T230; andre modeller krever særskilt støtte.
 
 **Bruk bare i et isolert testmiljø inntil du har kontrollert egen måler, M-Bus-kobling og installasjonen.** Denne README-en beskriver gjeldende installasjon via **Repositories**. Den [åpne nettsiden](https://mbus-energimaling-guide.muddyvole4097.chatgpt.site/) viser produktet og illustrasjoner. Se også [teknisk A–Å-veiledning](INSTALLASJON.md).
 
