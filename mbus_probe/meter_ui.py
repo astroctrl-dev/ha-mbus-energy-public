@@ -6,13 +6,16 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from meter_discovery import scan_bus
 
 
-PAGE = r"""<!doctype html><html lang="no"><meta charset="utf-8"><title>M-Bus målere</title>
-<h1>M-Bus målere</h1><p>Søk leser primæradressene 0–250. Målere med delt adresse kan ikke alltid skilles.</p>
+PAGE = r"""<!doctype html><html lang="no"><meta charset="utf-8"><title>M-Bus T230 – målere</title>
+<h1>M-Bus T230 – målere</h1><p>Søk på M-Bus-adressene 0–250. Funn vises med ID og adresse etter hvert. Du kan stoppe når du har funnet måleren du trenger. Målere med samme adresse kan gi tvetydige svar.</p>
 <button id="scan">Søk etter målere</button><button id="stop">Stopp søk</button><button id="auto">Velg eneste ledige automatisk</button>
 <p id="status"></p><h2>Tilgjengelige målere</h2><div id="available"></div>
 <h2>Etablerte målere</h2><div id="selected"></div><p id="error" role="alert"></p>
 <script>
 const root = location.pathname.replace(/\/$/, '');
+const statusLabels = {not_started:'Ikke startet', running:'Søker', completed:'Fullført', stopped:'Stoppet', failed:'Feilet'};
+const errorLabels = {'scan already running':'Et søk pågår allerede.', 'no scan is running':'Ingen søk pågår.', 'meter is not a discovered supported device':'Måleren må finnes i søket og være støttet.', 'automatic selection requires exactly one unassigned meter and a clean scan':'Automatisk valg krever nøyaktig én ledig måler og et fullført søk uten feil.', 'MQTT unavailable; cannot remove meter':'MQTT er utilgjengelig. Måleren kan ikke fjernes nå.'};
+function friendly(error) { return errorLabels[error.message] || error.message; }
 async function call(path, body) {
   const response = await fetch(root + path, {method: body ? 'POST' : 'GET',
     headers: body ? {'Content-Type':'application/json'} : {},
@@ -28,8 +31,10 @@ async function refresh() {
   try {
     const state = await call('/api/meters');
     document.getElementById('status').textContent =
-      `Søk: ${state.scan_status}, adresser sjekket: ${state.scan_progress}/251, ` +
-      `uavklarte svar: ${state.scan_errors.length}, opprydding venter: ${state.cleanup_pending}`;
+      `Søk: ${statusLabels[state.scan_status] || state.scan_status}. Framdrift: ${state.scan_progress}/251 adresser. ` +
+      `Funnet: ${state.available.length + state.selected.length} målere.` +
+      (state.scan_errors.length ? ` Uavklarte svar: ${state.scan_errors.length}.` : '') +
+      (state.cleanup_pending ? ` MQTT-opprydding venter: ${state.cleanup_pending}.` : '');
     for (const name of ['available', 'selected']) {
       const div = document.getElementById(name); div.replaceChildren();
       for (const item of state[name]) {
@@ -42,19 +47,19 @@ async function refresh() {
         div.append(line);
       }
     }
-  } catch (e) { document.getElementById('error').textContent = e.message; }
+  } catch (e) { document.getElementById('error').textContent = friendly(e); }
 }
 async function act(path, meter_id) {
   try { await call(path, {meter_id}); document.getElementById('error').textContent = ''; await refresh(); }
-  catch (e) { document.getElementById('error').textContent = e.message; }
+  catch (e) { document.getElementById('error').textContent = friendly(e); }
 }
 document.getElementById('scan').onclick = async () => {
   try { await call('/api/scan', {}); await refresh(); }
-  catch (e) { document.getElementById('error').textContent = e.message; }
+  catch (e) { document.getElementById('error').textContent = friendly(e); }
 };
 document.getElementById('stop').onclick = async () => {
   try { await call('/api/stop', {}); await refresh(); }
-  catch (e) { document.getElementById('error').textContent = e.message; }
+  catch (e) { document.getElementById('error').textContent = friendly(e); }
 };
 document.getElementById('auto').onclick = () => act('/api/auto', '');
 setInterval(refresh, 1500); refresh();
