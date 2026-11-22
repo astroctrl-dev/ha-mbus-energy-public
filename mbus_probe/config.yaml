@@ -1,7 +1,7 @@
-name: "M-Bus T230 MQTT bridge (v1.0.0)"
+name: "M-Bus T230 energimåling"
 version: "1.0.0"
 slug: "mbus_probe"
-description: "Read-only T230 polling and MQTT Discovery for isolated HA-MBUS-DEV"
+description: "Finn T230-målere på M-Bus og vis måleverdier i Home Assistant via MQTT."
 arch:
   - amd64
 startup: application
