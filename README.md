@@ -12,6 +12,8 @@ Bruk **repository-URL-en**, ikke lenken til en GitHub Release, en ZIP-fil eller 
 https://github.com/astroctrl-dev/ha-mbus-energy-public
 ```
 
+**Viktig:** GitHub-taggen v1.0.0 er et tidligere øyeblikksbilde. Bruk URL-en over, uten tagg eller /releases, for oppdatert apptekst, dokumentasjon og repository-oppsett. Appens versjonsfelt er fortsatt 1.0.0.
+
 1. I den isolerte Home Assistant-instansen: åpne **Settings → Apps → Install app**.
 2. Åpne menyen øverst til høyre og velg **Repositories**.
 3. Lim inn URL-en ovenfor og velg **Add**. Lukk dialogen. Appen vises under **M-Bus energimåling** i appbutikken. Hvis den ikke vises med en gang, oppdater appbutikken.
