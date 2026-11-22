@@ -4,22 +4,23 @@
 
 **Bruk bare i et isolert testmiljø inntil du har kontrollert egen måler, M-Bus-kobling og installasjonen.** Brukerrettet veiledning: [åpen installasjonsside](https://mbus-energimaling-guide.muddyvole4097.chatgpt.site/). Teknisk A–Å-veiledning: [INSTALLASJON.md](INSTALLASJON.md).
 
-## Installasjon fra offentlig repository
+## Legg til som custom app-repository
 
-1. Sørg for at målerens M-Bus-terminaler og adapterens bussterminaler er dokumentert. Ikke bruk terminaler merket VCC/GND basert på antakelser.
-2. Gjør USB-serieadapteren tilgjengelig inne i den isolerte Home Assistant-instansen. Kontroller serieporten etter omstart.
-3. Installer og start Mosquitto broker, og aktiver MQTT-integrasjonen i samme instans.
-4. Klon dette repositoryet i en terminal med tilgang til HA-konfigurasjonen, kopier appen til `/local_apps`, og oppdater appkatalogen:
+Bruk **repository-URL-en**, ikke lenken til en GitHub Release, en ZIP-fil eller installasjonssiden:
 
-   ```sh
-   git clone https://github.com/astroctrl-dev/ha-mbus-energy-public.git /config/mbus-release
-   mkdir -p /local_apps/mbus_probe
-   cp -a /config/mbus-release/mbus_probe/. /local_apps/mbus_probe/
-   ha store reload
-   ```
+```text
+https://github.com/astroctrl-dev/ha-mbus-energy-public
+```
 
-5. Åpne **Innstillinger → Apper**, installer **M-Bus T230 MQTT bridge (v1.0.0)**. Velg faktisk serieport, baud, leseintervall og MQTT-tilgang. Trykk **Lagre**, og start appen.
-6. Åpne appens brukerflate. Start søk, se ID og primæradresse når måleren dukker opp, og trykk **Legg til**. Du kan stoppe søket og legge til flere funn. Kontroller enheten under **Innstillinger → Enheter og tjenester → MQTT**.
+1. I den isolerte Home Assistant-instansen: åpne **Settings → Apps → Install app**.
+2. Åpne menyen øverst til høyre og velg **Repositories**.
+3. Lim inn URL-en ovenfor og velg **Add**. Lukk dialogen. Appen vises under **M-Bus energimåling** i appbutikken. Hvis den ikke vises med en gang, oppdater appbutikken.
+4. Åpne **M-Bus T230 MQTT bridge (v1.0.0)** og velg **Install**.
+5. Kontroller at USB-adapteren er tilgjengelig i denne instansen. Installer og start MQTT-broker, og aktiver MQTT-integrasjonen.
+6. Åpne appens **Configuration**, velg faktisk serieport, baud, leseintervall og MQTT-tilgang, og trykk **Save**. Start appen under **Info** med **Start**.
+7. Åpne appens webgrensesnitt. Velg **Søk etter målere**, legg til ønskede målere, og kontroller enhetene under **Settings → Devices & services → MQTT**.
+
+Ved endring i appens konfigurasjon: trykk **Save** og **Restart** appen. Du trenger ikke kopiere filer manuelt til `/local_apps` når du bruker denne repository-URL-en. Les [INSTALLASJON.md](INSTALLASJON.md) for kontroll og tilbakeføring.
 
 Ingen reelle måler-ID-er, adresser, passord, nettverksadresser eller råtelegram inngår i dette repositoryet. Eventuelle testtelegram er syntetiske. Måler-ID `12345678` og primæradresse `7` er fiktive eksempler.
 
