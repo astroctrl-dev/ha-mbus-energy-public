@@ -21,7 +21,7 @@ Identifiser USB-serieadapteren på verten og gi den isolerte gjesten USB-tilgang
 
 ## C. Legg til offentlig app-repository
 
-Bruk URL-en `https://github.com/astroctrl-dev/ha-mbus-energy-public` i **Settings → Apps → Install app → ⋮ → Repositories → Add**. Lukk dialogen, oppdater appbutikken om nødvendig, og åpne **M-Bus T230 MQTT bridge (v1.0.0)**. Velg **Install**. Du trenger ikke terminal, manuell kopiering til `/local_apps` eller `ha store reload` med denne metoden.
+Bruk URL-en `https://github.com/astroctrl-dev/ha-mbus-energy-public` i **Settings → Apps → Install app → ⋮ → Repositories → Add**. Lukk dialogen, oppdater appbutikken om nødvendig, og åpne **M-Bus T230 energimåling** (v1.0.0). Velg **Install**. Du trenger ikke terminal, manuell kopiering til `/local_apps` eller `ha store reload` med denne metoden.
 
 **Kontroll:** Repositoryet vises med navnet **M-Bus energimåling**, og appen kan åpnes fra appbutikken. Hvis du ikke finner den: kontroller at hele URL-en er lagt inn uten `/releases` eller `.git`, oppdater appbutikken og se Supervisor-loggen for valideringsfeil.
 
@@ -41,7 +41,7 @@ Installer appen. Velg faktisk serieport, baud, leseintervall (10, 20, 30, 60, 12
 
 ## F. Verifiser i Home Assistant
 
-Under **Settings → Devices & services → MQTT**: finn enheten for hver valgt måler. Kontroller energi, volum, effekt, volumstrøm og temperaturer som måleren faktisk rapporterer, med riktige enheter og fornuftig oppdatering. Restart appen og kontroller at enhetene gjenfinnes uten duplikater. Ved ugyldig telegram eller brudd skal avlesninger bli utilgjengelige, ikke fremstå som ferske.
+Under **Settings → Devices & services → MQTT**: finn enheten for hver valgt måler. Kontroller energi, volum, effekt, volumstrøm og temperaturer som måleren faktisk rapporterer, med riktige enheter og fornuftig oppdatering. Velg **Restart** for appen og kontroller at enhetene gjenfinnes uten duplikater. Ved ugyldig telegram eller brudd skal avlesninger bli utilgjengelige, ikke fremstå som ferske.
 
 ## Feilsøking
 
