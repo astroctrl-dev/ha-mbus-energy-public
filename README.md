@@ -20,7 +20,9 @@ https://github.com/astroctrl-dev/ha-mbus-energy-public
 4. Åpne **M-Bus T230 energimåling** (v1.0.0) og velg **Install**.
 5. Kontroller at USB-adapteren er tilgjengelig i denne instansen. Installer og start MQTT-broker, og aktiver MQTT-integrasjonen.
 6. Åpne appens **Configuration**, velg faktisk serieport, baud, leseintervall og MQTT-tilgang, og trykk **Save**. Start appen under **Info** med **Start**.
-7. Åpne appens webgrensesnitt. Velg **Søk etter målere**, legg til ønskede målere, og kontroller enhetene under **Settings → Devices & services → MQTT**.
+7. Åpne appens **GUI/webgrensesnitt** etter første oppstart. Velg **Søk etter målere**, og trykk **Legg til** for hver måler du vil bruke. Kontroller at de står under **Etablerte målere**.
+8. Gå tilbake til appens **Info**-side. Trykk **Stop**, vent til appen er stoppet, og trykk **Start** igjen. Dette er et nødvendig trinn i den observerte førstegangsprosedyren etter at målerne er lagt til.
+9. Kontroller at valgte målere og deres sensorverdier vises under **Settings → Devices & services → MQTT**. Dersom verdier mangler, undersøk app- og MQTT-loggene.
 
 Ved endring i appens konfigurasjon: trykk **Save** og **Restart** appen. Du trenger ikke kopiere filer manuelt til `/local_apps` når du bruker denne repository-URL-en. Les [INSTALLASJON.md](INSTALLASJON.md) for kontroll og tilbakeføring.
 
