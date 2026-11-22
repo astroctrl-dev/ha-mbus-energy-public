@@ -19,15 +19,17 @@ Identifiser USB-serieadapteren på verten og gi den isolerte gjesten USB-tilgang
 
 **Kontroll:** Porten finnes i gjesten. Dette viser USB-tilgang, ikke gyldig målerkommunikasjon.
 
-## C. Installer fra offentlig kilde
+## C. Legg til offentlig app-repository
 
-Åpne Terminal & SSH i riktig, isolert HA-instans. Kjør kommandoene i [README](README.md#installasjon-fra-offentlig-repository). Kontroller at `ha store reload` fullføres, og at appen vises under **Innstillinger → Apper**. Hvis den ikke vises, kontroller `/local_apps/mbus_probe/config.yaml`, kopieringssti og appkatalogens logg før nytt forsøk.
+Bruk URL-en `https://github.com/astroctrl-dev/ha-mbus-energy-public` i **Settings → Apps → Install app → ⋮ → Repositories → Add**. Lukk dialogen, oppdater appbutikken om nødvendig, og åpne **M-Bus T230 MQTT bridge (v1.0.0)**. Velg **Install**. Du trenger ikke terminal, manuell kopiering til `/local_apps` eller `ha store reload` med denne metoden.
 
-Før oppdatering: Ta backup av appdata og den eksisterende lokale appmappen, og noter versjonen. Oppdater fra en konkret godkjent commit eller tag, ikke fra ukontrollert flytende `main`.
+**Kontroll:** Repositoryet vises med navnet **M-Bus energimåling**, og appen kan åpnes fra appbutikken. Hvis du ikke finner den: kontroller at hele URL-en er lagt inn uten `/releases` eller `.git`, oppdater appbutikken og se Supervisor-loggen for valideringsfeil.
+
+Før oppdatering eller bytte fra en lokal app: Ta backup av appdata og gjeldende konfigurasjon. Et custom repository får en annen app-ID enn `local_mbus_probe`; behandle dette som egen installasjon og kontroller MQTT Discovery-enhetene for duplikater.
 
 ## D. Konfigurer og start
 
-Installer appen. Velg faktisk serieport, baud, leseintervall (10, 20, 30, 60, 120, 300 eller 600 sekunder), og MQTT-broker, port, bruker og passord. Ekstra lesing før hel time er valgfri, med 0–300 sekunders forskyvning. Trykk **Lagre**; start appen. Etter endring av konfigurasjon: lagre og start appen på nytt.
+Installer appen. Velg faktisk serieport, baud, leseintervall (10, 20, 30, 60, 120, 300 eller 600 sekunder), og MQTT-broker, port, bruker og passord. Ekstra lesing før hel time er valgfri, med 0–300 sekunders forskyvning. Trykk **Save** under **Configuration**; start appen under **Info** med **Start**. Etter endring: trykk **Save** og deretter **Restart**.
 
 **Kontroll:** Appen starter uten serieport- eller MQTT-feil. Del aldri passord eller appens `options.json` offentlig.
 
@@ -39,7 +41,7 @@ Installer appen. Velg faktisk serieport, baud, leseintervall (10, 20, 30, 60, 12
 
 ## F. Verifiser i Home Assistant
 
-Under **Innstillinger → Enheter og tjenester → MQTT**: finn enheten for hver valgt måler. Kontroller energi, volum, effekt, volumstrøm og temperaturer som måleren faktisk rapporterer, med riktige enheter og fornuftig oppdatering. Restart appen og kontroller at enhetene gjenfinnes uten duplikater. Ved ugyldig telegram eller brudd skal avlesninger bli utilgjengelige, ikke fremstå som ferske.
+Under **Settings → Devices & services → MQTT**: finn enheten for hver valgt måler. Kontroller energi, volum, effekt, volumstrøm og temperaturer som måleren faktisk rapporterer, med riktige enheter og fornuftig oppdatering. Restart appen og kontroller at enhetene gjenfinnes uten duplikater. Ved ugyldig telegram eller brudd skal avlesninger bli utilgjengelige, ikke fremstå som ferske.
 
 ## Feilsøking
 
@@ -53,4 +55,4 @@ Under **Innstillinger → Enheter og tjenester → MQTT**: finn enheten for hver
 
 ## Tilbakeføring
 
-Stopp appen. Gjenopprett den forrige appmappen, appdata og konfigurasjonen samlet fra backup. Kjør `ha store reload`, velg den tidligere appversjonen og start appen. Rydd kun Discovery-oppføringer som tilhører versjonen som ble fjernet. Bekreft at tidligere målere vises og at avlesningene fungerer. Ikke endre fysisk kobling eller andre HA-instansers konfigurasjon som del av denne tilbakeføringen.
+Stopp den nye appen. Gjenopprett den tidligere appen fra backup med tilhørende appdata og konfigurasjon. Ved overgang fra `local_mbus_probe`: gjenopprett den lokale appen som en egen installasjon; den nye repository-appen har en annen ID. Kontroller MQTT Discovery og rydd kun oppføringer som tilhører den nye installasjonen. Bekreft at tidligere målere vises og avlesningene fungerer. Ingen endring i fysisk kobling eller andre HA-instanser.
