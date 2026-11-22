@@ -39,9 +39,11 @@ Installer appen. Velg faktisk serieport, baud, leseintervall (10, 20, 30, 60, 12
 
 **Kontroll:** Den valgte ID-en står under **Etablerte målere**. Ved delt primæradresse eller tvetydig svar: stopp og avklar adressene før valg. Måler-ID tastes ikke inn manuelt.
 
+**Obligatorisk etter førstegangsvalg av målere:** Gå tilbake fra GUI til appens administrasjonsside i Home Assistant (**Info**). Trykk **Stop**, vent til appen er stoppet, og trykk deretter **Start**. Dette trinnet er nødvendig i den observerte installasjonsprosedyren for at valgte målere skal gi sensorverdier i Home Assistant. Ikke hopp direkte fra **Legg til** til kontroll av sensorverdier.
+
 ## F. Verifiser i Home Assistant
 
-Under **Settings → Devices & services → MQTT**: finn enheten for hver valgt måler. Kontroller energi, volum, effekt, volumstrøm og temperaturer som måleren faktisk rapporterer, med riktige enheter og fornuftig oppdatering. Velg **Restart** for appen og kontroller at enhetene gjenfinnes uten duplikater. Ved ugyldig telegram eller brudd skal avlesninger bli utilgjengelige, ikke fremstå som ferske.
+Under **Settings → Devices & services → MQTT**: finn enheten for hver valgt måler. Kontroller energi, volum, effekt, volumstrøm og temperaturer som måleren faktisk rapporterer, med riktige enheter og fornuftig oppdatering. Etter **Stop → Start** fra trinn E, kontroller at enhetene gjenfinnes uten duplikater. Ved ugyldig telegram eller brudd skal avlesninger bli utilgjengelige, ikke fremstå som ferske.
 
 ## Feilsøking
 
