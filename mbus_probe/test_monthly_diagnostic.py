@@ -43,7 +43,7 @@ class MonthlyDiagnosticTests(unittest.TestCase):
         fixture = Path(__file__).with_name("fixture_t230_sanitized.hex")
         normal = bytes.fromhex(fixture.read_text())
         values = verify_normal_frame(normal, 0, "00000000")
-        self.assertEqual(len(values), 7)
+        self.assertEqual(len(values), 10)
         with self.assertRaises(ValueError):
             verify_normal_frame(normal, 1, "00000000")
         with self.assertRaises(ValueError):

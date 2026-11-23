@@ -30,3 +30,25 @@ Når status er **complete**, viser **Open Web UI** en tabell med 24 akkumulerte 
 ## Oppdatering og tilbakeføring
 
 En repository-app oppdateres i **Settings → Apps**. Ta backup av appdata og innstillinger før oppdatering, og kontroller målervalg, MQTT-entiteter og ferske normalavlesninger etterpå. Ved feil: stopp appen, gjenopprett backupen av appdata og tidligere appversjon, start den på nytt, og kontroller MQTT og normalrammestatus. Kjør aldri to appkopier mot samme M-Bus-adapter og MQTT-identiteter samtidig.
+
+## Klokkesynkronisering
+
+Klokkesynk er avslått som standard. Kontroller først at Home Assistant har korrekt systemtid og velg målerens lokale tidssone i `clock_timezone` (standard `Europe/Oslo`). Aktiver `allow_clock_sync`, trykk **Save** og **Restart**. **Synkroniser målerklokke** i **Open Web UI** krever egen bekreftelse. Appen leser klokken, skriver systemtid omregnet til valgt tidssone, og leser tilbake for å verifisere. Måleren rapporterer minutter, ikke sekunder. Hvis kontrollen feiler, vises usikker status; kontroller klokken før du prøver igjen.
+
+`auto_clock_sync` er et separat, frivillig valg. Etter en verifisert manuell synk kontrolleres klokken én gang etter første gyldige avlesning ved appstart eller nytt målervalg. Automatisk retting skjer bare ved avvik over 120 og høyst 300 sekunder eller avvikende sommertidbit innen denne grensen. Større avvik krever manuell handling. Ordningen retter ikke automatisk et helt times avvik ved overgang til sommertid. Innhenting av ferske målinger skjer før denne klokkesjekken. Bruk ikke flere appkopier mot samme adapter.
+
+## Målinger i Home Assistant
+
+Effekt kan være positiv eller negativ. Hver gyldig målepost vurderes for seg; én manglende eller ugyldig verdi gir **unknown** for den sensoren uten å avvise andre gyldige verdier. Volum (m³) og separate akkumulerte timetellere for driftstid, vannstrømstid og tid uten måling vises når de finnes i normalrammen. Timetellerne forteller ikke om pumpa går akkurat nå.
+
+Etter en manuell, fullført historikkinnhenting vises 24 diagnostiske sensorer for akkumulerte kWh-stander og 23 for differanser. Historiske poster har ikke `state_class` som nye energitellere og mates ikke inn som dagens energiforbruk. Et nytt oppsett foreslår sorterbare navn og entitets-ID-er med `−01` … `−24`; eksisterende eller egendefinerte entitets-ID-er omdøpes ikke ved oppdatering. ID-en omfatter en pseudonym målernøkkel, som ikke er anonymisering.
+
+## Datoer for arkiverte verdier
+
+Målerens historikkramme med kWh-stander inneholder ikke verifisert lagringstid for hver post. Appen kan merke dato som **beregnet** fra antatt første dag i måneden: posisjon −01 tilhører innhentingsmåneden, −02 måneden før osv. Dette skjer bare ved ny innhenting etter verifisert manuell klokkesynk, når målerens klokke og valgt Home Assistant-tidssone samsvarer innen 120 sekunder, sommertidbit samsvarer og tidspunktet ikke er innen de første 15 minuttene etter månedsskiftet. Hvis vilkårene ikke er oppfylt, vises ingen beregnet dato. `estimated_date` er et anslag, ikke en målt avregningsdato. En gammel historikk får aldri flyttet datoene når kalenderen skifter.
+
+Ved en senere manuell innhenting kan appen registrere et bekreftet månedsskifte når alle arkivposisjoner er forskjøvet ett trinn og nyeste historiske målerstand er høyere enn før. Dette er bevis for endret arkiv, ikke et målt klokkeslett. Se `history_captured_at_utc` for innhentingstidspunkt og `meter_date_status` for datogrunnlaget.
+
+## Oppdatering
+
+Ta backup av appdata og innstillinger. Ved oppdatering fra 2.0.0: trykk **Update**, kontroller nye klokkevalg (standard avslått), **Save**, og **Start**. Se [installasjonsveiledningen](https://github.com/astroctrl-dev/ha-mbus-energy-public/blob/main/INSTALLASJON.md). Tidligere valg under 90 sekunder kjøres som 120 sekunder; velg et gyldig intervall før lagring.
