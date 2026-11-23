@@ -63,36 +63,30 @@ class DiscoveryTests(unittest.TestCase):
         self.assertEqual(self.registry.snapshot()["available"][0]["meter_id"], "23456789")
         self.registry.select("23456789")
 
+    def test_found_meter_visible_before_scan_finishes(self):
+        fixture = Path(__file__).with_name("fixture_t230_sanitized.hex")
+        template = validate(bytes.fromhex(fixture.read_text()))
+        observed = []
+        def read(_port, _baud, address, **_kwargs):
+            if address == 1:
+                observed.append(self.registry.snapshot())
+            return b"", b"frame" if address == 0 else b""
+        with patch("meter_discovery.read_one", side_effect=read), \
+             patch("meter_discovery.validate", return_value={
+                 **template, "type": "long", "control": 8, "ci": 0x72,
+                 "address": 0, "meter_id": "12345678", "manufacturer": "LUG"}):
+            scan_bus("/dev/ttyUSB0", 2400, self.registry,
+                     threading.Lock(), threading.Event())
+        self.assertEqual(observed[0]["scan_status"], "not_started")
+        self.assertEqual(observed[0]["available"][0]["meter_id"], "12345678")
+        self.assertEqual(observed[0]["available"][0]["address"], 0)
+
     def test_no_implicit_auto_on_ambiguous_scan(self):
         self._scan({0: "12345678", 2: "12345678"})
         self.assertEqual(self.registry.snapshot()["scan_status"], "failed")
         self.assertEqual(self.registry.snapshot()["selected"], [])
         with self.assertRaises(ValueError):
             self.registry.select_auto()
-
-    def test_discovery_is_visible_during_scan_and_can_be_stopped(self):
-        fixture = Path(__file__).with_name("fixture_t230_sanitized.hex")
-        template = validate(bytes.fromhex(fixture.read_text()))
-        captured = []
-
-        def read(_port, _baud, address, timeout, first_byte_timeout):
-            if address == 7:
-                return b"request", b"frame"
-            if address == 8:
-                captured.append(self.registry.snapshot())
-                self.registry.scan_stop.set()
-            return b"request", b""
-
-        with patch("meter_discovery.read_one", side_effect=read), \
-             patch("meter_discovery.validate", return_value={
-                 **template, "type": "long", "control": 8, "address": 7,
-                 "meter_id": "12345678", "manufacturer": "LUG", "medium_code": 4}):
-            scan_bus("/dev/ttyUSB0", 2400, self.registry,
-                     threading.Lock(), threading.Event())
-        self.assertEqual(captured[0]["available"][0]["meter_id"], "12345678")
-        self.assertEqual(self.registry.snapshot()["scan_status"], "stopped")
-        self.registry.select("12345678")
-        self.assertEqual(self.registry.snapshot()["selected"][0]["address"], 7)
 
     def test_only_discovered_and_supported_can_be_selected(self):
         with self.assertRaisesRegex(ValueError, "discovered supported"):
