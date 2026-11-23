@@ -47,7 +47,7 @@ class MqttTests(unittest.TestCase):
     def test_valid_read_online_after_states(self):
         client = FakeClient()
         values = publish_reading(client, self.decoded, "00000000")
-        self.assertEqual(values["energy"], 57978)
+        self.assertEqual(values["energy"], 12345)
         self.assertEqual(len(client.messages), 31)
         self.assertEqual(client.messages[-1],
                          (availability_topic(device_key("00000000")), "online", 1, True))
@@ -81,7 +81,7 @@ class MqttTests(unittest.TestCase):
                   in client.messages if topic.endswith("/state")}
         for kind in ("operating_time", "flow_time", "missing_time"):
             self.assertEqual(states[kind], "unknown")
-        self.assertEqual(states["energy"], "57978.0")
+        self.assertEqual(states["energy"], "12345.0")
         self.assertEqual(client.messages[-1][1], "online")
 
     def test_invalid_energy_does_not_hide_signed_power_and_clears_stale_energy(self):
@@ -99,7 +99,7 @@ class MqttTests(unittest.TestCase):
         self.assertEqual(states["energy"], "unknown")
         self.assertEqual(states["power"], "-999999")
         self.assertEqual(states["data_quality"], "Delvis")
-        self.assertEqual(states["volume"], "39399.79")
+        self.assertEqual(states["volume"], "123.45")
         self.assertEqual(client.messages[-1][1], "online")
 
     def test_invalid_clock_does_not_block_measurements(self):
@@ -112,7 +112,7 @@ class MqttTests(unittest.TestCase):
                                  read_at_utc="2026-11-23T14:35:00Z")
         states = {topic.rsplit("/", 2)[-2]: payload for topic, payload, _, _
                   in client.messages if topic.endswith("/state")}
-        self.assertEqual(values["energy"], 57978)
+        self.assertEqual(values["energy"], 12345)
         self.assertEqual(states["meter_local_time"], "unknown")
         self.assertEqual(states["meter_summer_time"], "unknown")
         self.assertEqual(states["last_successful_read_utc"], "2026-11-23T14:35:00Z")
@@ -125,7 +125,7 @@ class MqttTests(unittest.TestCase):
                   in client.messages if topic.endswith("/state")}
         self.assertEqual(states["meter_status"], "0x10")
         self.assertEqual(states["data_quality"], "Advarsel")
-        self.assertEqual(states["energy"], "57978.0")
+        self.assertEqual(states["energy"], "12345.0")
         self.assertEqual(client.messages[-1][1], "online")
 
     def test_bad_status_does_not_publish(self):

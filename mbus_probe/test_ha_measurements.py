@@ -13,11 +13,11 @@ class SelectionTests(unittest.TestCase):
     def test_only_current_measurements(self):
         values = select_measurements(self.decoded, "00000000")
         self.assertEqual(values, {
-            "energy": 57978.0, "volume": 39399.79, "power": 0.3,
-            "flow": 0.683, "flow_temperature": 32.3,
-            "return_temperature": 31.9, "temperature_difference": 0.4,
-            "operating_time": 110789.0, "flow_time": 71025.0,
-            "missing_time": 338.0,
+            "energy": 12345.0, "volume": 123.45, "power": 1.2,
+            "flow": 0.125, "flow_temperature": 45.6,
+            "return_temperature": 32.1, "temperature_difference": 13.5,
+            "operating_time": 240.0, "flow_time": 120.0,
+            "missing_time": 100.0,
         })
 
     def test_negative_current_power_is_valid_but_counters_stay_nonnegative(self):
@@ -27,19 +27,19 @@ class SelectionTests(unittest.TestCase):
         negative_power = [({**r, "value": -0.2} if r is power else r) for r in base]
         values = select_measurements({**self.decoded, "records": negative_power}, "00000000")
         self.assertEqual(values["power"], -0.2)
-        self.assertEqual(values["energy"], 57978.0)
+        self.assertEqual(values["energy"], 12345.0)
         for bad in (-1, float("nan"), float("inf")):
             records = [({**r, "value": bad} if r is energy else r) for r in base]
             with self.subTest(bad=bad):
                 selected = select_measurements({**self.decoded, "records": records}, "00000000")
                 self.assertNotIn("energy", selected)
-                self.assertEqual(selected["power"], 0.3)
+                self.assertEqual(selected["power"], 1.2)
         for bad in (float("nan"), float("-inf")):
             records = [({**r, "value": bad} if r is power else r) for r in base]
             with self.subTest(bad=bad):
                 selected = select_measurements({**self.decoded, "records": records}, "00000000")
                 self.assertNotIn("power", selected)
-                self.assertEqual(selected["energy"], 57978)
+                self.assertEqual(selected["energy"], 12345)
 
     def test_checksum_valid_sanitized_frame_with_negative_bcd_power(self):
         path = Path(__file__).with_name("fixture_t230_sanitized.hex")
@@ -53,13 +53,13 @@ class SelectionTests(unittest.TestCase):
         decoded = validate(bytes(frame))
         values = select_measurements(decoded, "00000000")
         self.assertEqual(values["power"], -0.2)
-        self.assertEqual(values["energy"], 57978.0)
+        self.assertEqual(values["energy"], 12345.0)
 
     def test_missing_hours_are_error_duration_not_operating_time(self):
         missing = [r for r in self.decoded["records"] if r.get("kind") == "missing_time"]
         self.assertEqual(len(missing), 2)  # Current error duration and last year's value.
         self.assertEqual([r["storage"] for r in missing], [0, 1])
-        self.assertEqual(select_measurements(self.decoded, "00000000")["missing_time"], 338)
+        self.assertEqual(select_measurements(self.decoded, "00000000")["missing_time"], 100)
 
     def test_identity_and_status_fail_closed(self):
         for change in ({"meter_id": "12345678"}, {"status": 1},
@@ -108,7 +108,7 @@ class SelectionTests(unittest.TestCase):
             {"kind": "unknown_vif", "current_record": True, "value": 999},
             {"kind": "invalid_bcd", "current_record": True, "value": 999},
         ]}
-        self.assertEqual(select_measurements(decoded, "00000000")["energy"], 57978)
+        self.assertEqual(select_measurements(decoded, "00000000")["energy"], 12345)
 
     def test_duplicate_current_energy_rejected(self):
         records = self.decoded["records"]

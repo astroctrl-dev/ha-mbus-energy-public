@@ -66,7 +66,7 @@ class ServiceTests(unittest.TestCase):
         with patch("mbus_service.read_one", return_value=(b"", b"frame")), \
              patch("mbus_service.validate", return_value=self.decoded):
             values = poll_once({"meter_id": "00000000", "address": 0}, client)
-        self.assertEqual(values["energy"], 57978)
+        self.assertEqual(values["energy"], 12345)
         # 15 Discovery configs + 10 measurements + 5 diagnostics + availability
         self.assertEqual(len(client.messages), 31)
         states = {topic.rsplit("/", 2)[-2]: payload for topic, payload, _, _

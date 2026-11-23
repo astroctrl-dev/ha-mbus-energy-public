@@ -22,7 +22,7 @@ class AnalysisExportTests(unittest.TestCase):
             path = Path(tmp) / "samples.jsonl"
             sample = make_sample(self.decoded, "00000000", "2026-11-23T02:00:00Z", key)
             self.assertTrue(sample["alias"].startswith("Meter-"))
-            self.assertEqual(sample["meter_local_time"], "2026-11-21T19:37")
+            self.assertEqual(sample["meter_local_time"], "2024-01-01T12:00")
             self.assertTrue(any(r["kind"] == "energy" for r in sample["records"]))
             append_sample(path, sample, limit=2)
             append_sample(path, sample, limit=2)
@@ -57,7 +57,7 @@ class AnalysisExportTests(unittest.TestCase):
         rows = list(wb["Normal records"].values)
         self.assertEqual(rows[0][0:3], ("alias", "read_at_utc", "meter_local_time"))
         energy = [r for r in rows[1:] if r[5] == "energy" and r[6] == 0 and r[7] == 0]
-        self.assertEqual(energy[0][10:12], (57978, "kWh"))
+        self.assertEqual(energy[0][10:12], (12345, "kWh"))
         self.assertNotIn("00000000", str(rows))
         self.assertEqual(list(wb["Info"].values)[3][1],
                          "Unspecified; local meter time is not UTC")
