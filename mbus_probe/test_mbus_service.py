@@ -1,11 +1,12 @@
 import unittest
 import tempfile
 import threading
+from types import SimpleNamespace
 from unittest.mock import patch
 from pathlib import Path
 
 from mbus_probe import validate
-from mbus_service import STOP, on_broker_connect, poll_once, run
+from mbus_service import STOP, RequestPacer, on_broker_connect, poll_once, run
 from meter_registry import MeterRegistry
 
 
@@ -23,10 +24,42 @@ class FakeClient:
 
 
 class ServiceTests(unittest.TestCase):
+    def setUp(self):
+        # Capture persistence is tested separately without writing to HAOS /data.
+        capture = patch("mbus_service.append_sample")
+        capture.start()
+        self.addCleanup(capture.stop)
+        sample = patch("mbus_service.make_sample", return_value={"alias": "Meter-test", "records": []})
+        sample.start()
+        self.addCleanup(sample.stop)
+
     @classmethod
     def setUpClass(cls):
         fixture = Path(__file__).with_name("fixture_t230_sanitized.hex")
         cls.decoded = validate(bytes.fromhex(fixture.read_text()))
+
+    def test_restart_waits_for_prior_bus_request(self):
+        class Waiter:
+            def __init__(self):
+                self.delays = []
+            def wait(self, seconds):
+                self.delays.append(seconds)
+                return False
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "last_bus_request"
+            clock = [1000.0]
+            first = Waiter()
+            self.assertTrue(RequestPacer(path, clock=lambda: clock[0]).before_request(first))
+            self.assertEqual(first.delays, [61.0])
+            self.assertEqual(float(path.read_text()), 1000.0)
+            clock[0] = 1009.0
+            after_restart = Waiter()
+            self.assertTrue(RequestPacer(path, clock=lambda: clock[0]).before_request(after_restart))
+            self.assertEqual(after_restart.delays, [52.0])
+            clock[0] = 1080.0
+            next_cycle = Waiter()
+            self.assertTrue(RequestPacer(path, clock=lambda: clock[0]).before_request(next_cycle))
+            self.assertEqual(next_cycle.delays, [0.0])
 
     def test_valid_poll(self):
         client = FakeClient()
@@ -34,8 +67,12 @@ class ServiceTests(unittest.TestCase):
              patch("mbus_service.validate", return_value=self.decoded):
             values = poll_once({"meter_id": "00000000", "address": 0}, client)
         self.assertEqual(values["energy"], 12345)
-        # 9 Discovery configs + 7 measurements + 2 diagnostics + availability
-        self.assertEqual(len(client.messages), 19)
+        # 12 Discovery configs + 7 measurements + 5 diagnostics + availability
+        self.assertEqual(len(client.messages), 25)
+        states = {topic.rsplit("/", 2)[-2]: payload for topic, payload, _, _
+                  in client.messages if topic.endswith("/state")}
+        self.assertRegex(states["last_successful_read_utc"],
+                         r"^20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")
         self.assertEqual(client.messages[-1][1], "online")
 
     def test_status_0x10_warns_only_once_per_process(self):
@@ -64,6 +101,18 @@ class ServiceTests(unittest.TestCase):
             with patch("mbus_service._STATUS_10_LOGGED", False):
                 poll_once({"meter_id": "00000000", "address": 0}, client)
             self.assertEqual(log_warning.call_count, 2)
+
+    def test_analysis_save_error_warns_once_without_blocking_mqtt(self):
+        client = FakeClient()
+        with patch("mbus_service._ANALYSIS_SAVE_ERROR_LOGGED", False), \
+             patch("mbus_service.read_one", return_value=(b"", b"frame")), \
+             patch("mbus_service.validate", return_value=self.decoded), \
+             patch("mbus_service.append_sample", side_effect=OSError("disk unavailable")), \
+             patch("mbus_service.LOG.warning") as warning:
+            poll_once({"meter_id": "00000000", "address": 0}, client)
+            poll_once({"meter_id": "00000000", "address": 0}, client)
+            warning.assert_called_once()
+            self.assertEqual(sum(payload == "online" for _, payload, _, _ in client.messages), 2)
 
     def test_wrong_address_never_publishes(self):
         client = FakeClient()
@@ -126,6 +175,23 @@ class ServiceTests(unittest.TestCase):
                       if topic.endswith("/availability") and payload == "online"]
             self.assertEqual(len(online), 2)
             self.assertNotEqual(*online)
+
+    def test_unverified_restore_keeps_ui_alive_and_never_polls(self):
+        class StopAfterOne:
+            calls = 0
+            def is_set(self):
+                return self.calls > 0
+            def wait(self, _seconds):
+                self.calls += 1
+        blocked = threading.Event()
+        blocked.set()
+        client = FakeClient()
+        with patch("mbus_service.STOP", StopAfterOne()), \
+             patch("mbus_service.read_one") as reader:
+            run({"meter_id": "00000000", "address": 0}, client,
+                history_controller=SimpleNamespace(blocked=blocked))
+        reader.assert_not_called()
+        self.assertIn(("mbus/t230/bridge/availability", "offline", 1, True), client.messages)
 
     def test_broker_reconnect_invalidates_all_meter_states(self):
         with tempfile.TemporaryDirectory() as directory:
