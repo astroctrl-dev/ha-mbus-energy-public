@@ -185,26 +185,36 @@ def on_broker_connect(client, registry):
 
 
 
+def publish_history_discovery(client, meter_id):
+    """Publish and confirm all 47 retained history discovery messages."""
+    count = 0
+    for topic, payload, retain in history_discovery_messages(meter_id):
+        result = client.publish(topic, payload, qos=1, retain=retain)
+        if result.rc:
+            raise ConnectionError("MQTT history discovery publish failed")
+        result.wait_for_publish(timeout=5)
+        if not result.is_published():
+            raise ConnectionError("MQTT history discovery PUBACK timeout")
+        count += 1
+    LOG.info("MQTT history discovery acknowledged: %d entities for selected meter", count)
+    return count
+
+
 def publish_saved_history(client, registry):
     """Run outside Paho's on_connect callback so PUBACKs can be processed."""
     try:
-        # Register historical entities even before the first history capture.
-        # Keep the same unique IDs so upgrades do not duplicate entities.
-        for row in registry.snapshot()["selected"]:
-            for topic, payload, retain in history_discovery_messages(row["meter_id"]):
-                result = client.publish(topic, payload, qos=1, retain=retain)
-                if result.rc:
-                    raise ConnectionError("MQTT history discovery publish failed")
-                result.wait_for_publish(timeout=5)
-        for alias, snapshot in load_history("/data/analysis", registry.snapshot()["selected"]):
-            # Match saved alias to the selected meter without exposing its ID.
+        selected = registry.snapshot()["selected"]
+        LOG.info("MQTT history discovery startup: %d selected meters", len(selected))
+        for row in selected:
+            publish_history_discovery(client, row["meter_id"])
+        for alias, snapshot in load_history("/data/analysis", selected):
             from history_controller import history_file
-            for row in registry.snapshot()["selected"]:
+            for row in selected:
                 if history_file("/data/analysis", row["meter_id"]).stem == alias:
                     publish_history(client, row["meter_id"], snapshot)
                     break
-    except (OSError, ValueError, ConnectionError):
-        LOG.warning("Saved monthly history could not be published after broker reconnect")
+    except (OSError, ValueError, ConnectionError, RuntimeError) as exc:
+        LOG.warning("MQTT history discovery or saved history publish failed: %s", type(exc).__name__)
 
 
 def main():
