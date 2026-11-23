@@ -1,58 +1,29 @@
-# Installasjon, kontroll og tilbakeføring
+# Installasjon, oppdatering og tilbakeføring
 
-## Forutsetninger
+## Før du begynner
 
-- Isolert Home Assistant OS-instans med administratoradgang.
-- Dokumentert M-Bus-måler, korrekt M-Bus-adapter og bekreftet busstilkobling.
-- USB-adapter synlig i Home Assistant-gjesten; ved Proxmox konfigureres USB-tilgang bare for denne gjesten.
-- MQTT-broker og MQTT-integrasjon i samme gjest, med egen bruker. Passord oppbevares bare i appens konfigurasjon.
+Kontroller målerens dokumenterte M-Bus-terminaler, adapterens terminaler og bussforsyning. Ledningsfarge alene identifiserer ikke tilkoblingen. Bruk ikke adapterens VCC/GND eller ekstern spenning uten dokumentert grunnlag. Sørg for at USB-serieadapteren vises i Home Assistant OS, at MQTT-broker er installert og at MQTT-integrasjonen er tilkoblet. Én app skal bruke adapteren om gangen.
 
-## A. Fysisk kobling
+## Ny installasjon
 
-Finn målerens dokumenterte M-Bus-terminaler og adapterens dokumenterte MBUS-terminaler. Verifiser ledningsparet og bussforsyning mot begge enhetenes dokumentasjon før tilkobling. Farger er ikke en pålitelig identifikasjon. Koble ikke ekstern strøm til VCC/GND uten dokumentert grunnlag. Noter lokalt modell og oppsett; legg ikke merkeplate eller serienummer i en offentlig sak.
+1. Åpne **Settings → Apps → Install app → ⋮ → Repositories**. Legg til `https://github.com/astroctrl-dev/ha-mbus-energy-public` og velg **Add**. Oppdater appbutikken ved behov.
+2. Åpne **M-Bus T230 energimåling** og velg **Install**.
+3. I **Configuration**: velg faktisk `serial_port`, målerens baudrate og intervall 90 sekunder eller mer. `mqtt_host` er `core-mosquitto` som standard; fyll inn MQTT-bruker og passord lokalt. Ikke del `options.json` eller passord.
+4. Trykk **Save**, gå til **Info** og velg **Start**. Åpne **Open Web UI**. Velg **Søk etter målere**. Gyldige funn vises fortløpende med måler-ID og primæradresse; trykk **Legg til** for ønsket måler og **Stopp søk** når du er ferdig.
+5. Finn måleren under **Settings → Devices & services → MQTT**. Kontroller måleverdier, enheter, klokke, tidspunkt for siste avlesning og tilgjengelighet. Etter konfigurasjonsendring: **Save** og **Restart**.
 
-**Kontroll:** Adapteren er tilkoblet uten feilindikasjon. **Ved feil:** Koble fra og verifiser dokumentasjonen på nytt.
+Ved ingen serieport: kontroller USB-tilordning og portnavn etter omstart. Ved ingen måler: kontroller dokumentert busstilkobling, baud og appens logg. Et gyldig USB-enhetsnavn alene er ikke bevis på målersvar.
 
-## B. USB og isolert gjest
+## Oppgradering fra v1.0.0
 
-Identifiser USB-serieadapteren på verten og gi den isolerte gjesten USB-tilgang. Se hvilken serieport gjesten faktisk får, og bekreft den igjen etter omstart. Portnavn kan variere.
+Bruk samme repository-URL og app. Ta full backup av appdata og noter konfigurasjonen før **Update**. Den installerte appens målervalg og lagrede data ligger i appens `/data`; ta vare på denne sammen med backupen. Stopp appen, velg **Update**, og kontroller **Configuration** før **Start**. Eksisterende intervallvalg 10, 20, 30 eller 60 sekunder blir trygt behandlet som 120 sekunder i v2. Velg 120 sekunder eksplisitt og trykk **Save**. Kontroller at de tidligere MQTT-entitetene beholdes og at ny avlesning kommer inn. En lokal app og en repository-app har ulike app-ID-er og deler ikke automatisk appdata.
 
-**Kontroll:** Porten finnes i gjesten. Dette viser USB-tilgang, ikke gyldig målerkommunikasjon.
+## Månedshistorikk og klokke
 
-## C. Legg til offentlig app-repository
+Målerens lokale klokke gjengis som tekst uten UTC-offset; sommertidsflagget vises separat. Siste vellykkede lesetid er Home Assistants UTC-tidspunkt. Ikke still målerklokken via appen.
 
-Bruk URL-en `https://github.com/astroctrl-dev/ha-mbus-energy-public` i **Settings → Apps → Install app → ⋮ → Repositories → Add**. Lukk dialogen, oppdater appbutikken om nødvendig, og åpne **M-Bus T230 energimåling** (v1.0.0). Velg **Install**. Du trenger ikke terminal, manuell kopiering til `/local_apps` eller `ha store reload` med denne metoden.
-
-**Kontroll:** Repositoryet vises med navnet **M-Bus energimåling**, og appen kan åpnes fra appbutikken. Hvis du ikke finner den: kontroller at hele URL-en er lagt inn uten `/releases` eller `.git`, oppdater appbutikken og se Supervisor-loggen for valideringsfeil.
-
-Før oppdatering eller bytte fra en lokal app: Ta backup av appdata og gjeldende konfigurasjon. Et custom repository får en annen app-ID enn `local_mbus_probe`; behandle dette som egen installasjon og kontroller MQTT Discovery-enhetene for duplikater.
-
-## D. Konfigurer og start
-
-Installer appen. Velg faktisk serieport, baud, leseintervall (10, 20, 30, 60, 120, 300 eller 600 sekunder), og MQTT-broker, port, bruker og passord. Ekstra lesing før hel time er valgfri, med 0–300 sekunders forskyvning. Trykk **Save** under **Configuration**; start appen under **Info** med **Start**. Etter endring: trykk **Save** og deretter **Restart**.
-
-**Kontroll:** Appen starter uten serieport- eller MQTT-feil. Del aldri passord eller appens `options.json` offentlig.
-
-## E. Søk og velg
-
-Åpne appens ingress-side. Trykk **Søk etter målere**. Appen spør primæradressene 0–250 i rekkefølge. Gyldige funn vises løpende med ID og adresse. Trykk **Legg til** når du ser en ønsket måler; bruk **Stopp søk** når du ikke trenger flere. Du kan legge til flere målere fra de samme funnene. Automatisk valg er bare aktuelt når et fullført, feilfritt søk har nøyaktig én ledig støttet måler.
-
-**Kontroll:** Den valgte ID-en står under **Etablerte målere**. Ved delt primæradresse eller tvetydig svar: stopp og avklar adressene før valg. Måler-ID tastes ikke inn manuelt.
-
-## F. Verifiser i Home Assistant
-
-Under **Settings → Devices & services → MQTT**: finn enheten for hver valgt måler. Kontroller energi, volum, effekt, volumstrøm og temperaturer som måleren faktisk rapporterer, med riktige enheter og fornuftig oppdatering. Velg **Restart** for appen og kontroller at enhetene gjenfinnes uten duplikater. Ved ugyldig telegram eller brudd skal avlesninger bli utilgjengelige, ikke fremstå som ferske.
-
-## Feilsøking
-
-| Symptom | Kontroller |
-| --- | --- |
-| Ingen serieport | USB på verten, gjestens USB-tilgang og faktisk enhetsnavn etter omstart. |
-| Ingen funn | Dokumentert busstilkobling, baud, tilgang til serieport og timeout i appens logg. |
-| Tvetydig svar | Flere målere på samme primæradresse; avklar adresser. |
-| Måler funnet, ingen HA-verdi | Gyldig telegram, identitet, måleposter og MQTT-tilkobling. |
-| Duplikater etter oppdatering | Sjekk MQTT Discovery-opprydding og tidligere appdata. |
+For historikk: aktiver `allow_monthly_history`, trykk **Save** og **Restart**, og velg **Hent månedshistorikk** på riktig måler. Vent til status **complete**. Da vises akkumulerte stander og differanser i **Open Web UI**, og **Last ned analyse (.xlsx)** kan eksportere dem sammen med normalavlesningene. Avregningsdato vises bare hvis den kan verifiseres i målerdata; arkivposisjoner er ikke kalenderdatoer. Ved **restore_unverified** forblir vanlig polling blokkert til normalrammen er kontrollert.
 
 ## Tilbakeføring
 
-Stopp den nye appen. Gjenopprett den tidligere appen fra backup med tilhørende appdata og konfigurasjon. Ved overgang fra `local_mbus_probe`: gjenopprett den lokale appen som en egen installasjon; den nye repository-appen har en annen ID. Kontroller MQTT Discovery og rydd kun oppføringer som tilhører den nye installasjonen. Bekreft at tidligere målere vises og avlesningene fungerer. Ingen endring i fysisk kobling eller andre HA-instanser.
+Stopp appen. Gjenopprett forrige appversjon og den tilhørende appbackupen med konfigurasjon og appdata. Start appen igjen, kontroller MQTT-enhetene og en fersk normalavlesning. Kjør aldri to appkopier samtidig mot samme adapter og MQTT-identiteter.
