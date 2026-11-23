@@ -93,13 +93,16 @@ def decode_records(data):
         raw = data[i:i+n]; i += n
         storage = (dif >> 6) & 1
         tariff = 0
+        subunit = 0
         for index, extension in enumerate(difes):
             storage |= (extension & 0x0f) << (1 + 4 * index)
             tariff |= ((extension >> 4) & 3) << (2 * index)
+            subunit |= ((extension >> 6) & 1) << index
         record = {"offset": start, "dif": dif, "dife_hex": bytes(difes).hex(" "),
                   "vif": vif, "vife_hex": bytes(vifes).hex(" "), "raw_hex": raw.hex(" "),
-                  "storage": storage, "tariff": tariff, "function": (dif >> 4) & 3}
-        record["current_record"] = storage == 0 and tariff == 0 and record["function"] == 0
+                  "storage": storage, "tariff": tariff, "subunit": subunit,
+                  "function": (dif >> 4) & 3}
+        record["current_record"] = storage == 0 and tariff == 0 and subunit == 0 and record["function"] == 0
         kind, unit, scale = vif_unit(vif)
         if kind == "missing_time" and record["function"] == 0:
             kind = "operating_time"
