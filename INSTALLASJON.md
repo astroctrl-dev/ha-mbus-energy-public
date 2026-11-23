@@ -16,7 +16,7 @@ Ved ingen serieport: kontroller USB-tilordning og portnavn etter omstart. Ved in
 
 ## Oppgradering fra v1.0.0
 
-Bruk samme repository-URL og app. Ta full backup av appdata og noter konfigurasjonen før **Update**. Den installerte appens målervalg og lagrede data ligger i appens `/data`; ta vare på denne sammen med backupen. Stopp appen, velg **Update**, og kontroller **Configuration** før **Start**. Eksisterende intervallvalg 10, 20, 30 eller 60 sekunder blir trygt behandlet som 120 sekunder i v2. Velg 120 sekunder eksplisitt og trykk **Save**. Kontroller at de tidligere MQTT-entitetene beholdes og at ny avlesning kommer inn. En lokal app og en repository-app har ulike app-ID-er og deler ikke automatisk appdata.
+Bruk samme repository-URL og app. Ta full backup av appdata og noter konfigurasjonen før **Update**. Den installerte appens målervalg og lagrede data ligger i appens `/data`; ta vare på denne sammen med backupen. Stopp appen, velg **Update**, og kontroller **Configuration** før **Start**. Eldre intervallvalg 10, 20, 30 og 60 sekunder vises fortsatt i listen for oppgraderingskompatibilitet, men behandles som 120 sekunder i v2. Ikke bruk dem for ny konfigurasjon. Velg 120 sekunder eksplisitt og trykk **Save**. Kontroller at de tidligere MQTT-entitetene beholdes og at ny avlesning kommer inn. En lokal app og en repository-app har ulike app-ID-er og deler ikke automatisk appdata.
 
 ## Månedshistorikk og klokke
 
