@@ -128,6 +128,19 @@ def run(config, client, registry=None, bus_lock=None, history_controller=None,
         request_pacer=None, on_valid_round=None):
     """Fail closed on any bad poll. MQTT Last Will also handles abrupt termination."""
     history_discovery_confirmed = set()
+    history_discovery_inflight = set()
+    history_discovery_lock = threading.Lock()
+
+    def publish_history_async(meter_id):
+        try:
+            publish_history_discovery(client, meter_id)
+            with history_discovery_lock:
+                history_discovery_confirmed.add(meter_id)
+        except (OSError, ValueError, ConnectionError, RuntimeError) as exc:
+            LOG.warning("MQTT history discovery retry pending: %s", type(exc).__name__)
+        finally:
+            with history_discovery_lock:
+                history_discovery_inflight.discard(meter_id)
     while not STOP.is_set():
         if history_controller and history_controller.blocked.is_set():
             client.publish(BRIDGE_AVAILABILITY, "offline", qos=1, retain=True)
@@ -162,12 +175,14 @@ def run(config, client, registry=None, bus_lock=None, history_controller=None,
                 LOG.info("Valid T230 frame: %d current measurements, %d unavailable",
                          len(values), len(SENSORS) - len(values))
                 valid_meter_ids.append(row["meter_id"])
-                if row["meter_id"] not in history_discovery_confirmed:
-                    try:
-                        publish_history_discovery(client, row["meter_id"])
-                        history_discovery_confirmed.add(row["meter_id"])
-                    except (OSError, ValueError, ConnectionError, RuntimeError) as exc:
-                        LOG.warning("MQTT history discovery retry pending: %s", type(exc).__name__)
+                with history_discovery_lock:
+                    schedule_history = (row["meter_id"] not in history_discovery_confirmed
+                                        and row["meter_id"] not in history_discovery_inflight)
+                    if schedule_history:
+                        history_discovery_inflight.add(row["meter_id"])
+                if schedule_history:
+                    threading.Thread(target=publish_history_async, args=(row["meter_id"],),
+                                     daemon=True).start()
             except (OSError, ValueError, ConnectionError, RuntimeError) as exc:
                 LOG.warning("T230 unavailable at primary address %d: %s", row["address"], exc)
                 try:
