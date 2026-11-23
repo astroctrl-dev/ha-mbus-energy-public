@@ -17,7 +17,7 @@ Les Landis+Gyr T230 over kablet M-Bus, vis målinger i Home Assistant via MQTT D
 
 ## Klokke og data
 
-Målerens lokale dato og klokkeslett vises som tekst fra normalrammen. Det er et klokkeslett fra måleren uten kodet UTC-offset; Home Assistants tidspunkt for siste vellykkede avlesning vises separat i UTC. Sommertidflagget rapporteres separat. Historiske energiposter er 24 akkumulerte kWh-stander og 23 differanser mellom nabo-stander. Historiske avregningsdatoer vises bare når de faktisk er verifisert; posisjon i arkivet er ikke en avregningsdato.
+Målerens lokale dato og klokkeslett vises som tekst fra normalrammen. Det er et klokkeslett fra måleren uten kodet UTC-offset; Home Assistants tidspunkt for siste vellykkede avlesning vises separat i UTC. Sommertidflagget rapporteres separat. Historiske energiposter er 24 akkumulerte kWh-stander og 23 differanser mellom nabo-stander. Faktiske avregningsdatoer vises bare når de er verifisert fra måleren. Beregnede datoer merkes tydelig; posisjon i arkivet er ikke en målt avregningsdato.
 
 **Last ned analyse (.xlsx)** lager en fil av allerede lagrede, validerte avlesninger. Nedlasting sender ingen ny M-Bus-forespørsel. Filen bruker et alias i stedet for ekte måler-ID og utelater råtelegrammer og tilgangsopplysninger. Den inneholder likevel reelle måleverdier og bør gjennomgås før deling.
 
