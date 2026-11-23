@@ -1,37 +1,32 @@
-# M-Bus energimåling i Home Assistant
+# M-Bus T230 energimåling for Home Assistant
 
-Åpen kildekode og installasjonsveiledning for en M-Bus-leser med MQTT Discovery. Appen søker primæradresser fortløpende, lar deg stoppe søket når en ønsket måler er funnet, og lar deg legge til flere identifiserte målere. Hver støttet måler får egen enhet i Home Assistant. Denne utgaven validerer telegram fra Landis+Gyr T230; andre modeller krever særskilt støtte.
+Denne appen leser Landis+Gyr ULTRAHEAT T230 over kablet M-Bus og publiserer målinger via MQTT Discovery. Den viser aktuell energi, volum, effekt, volumstrøm, temperaturer og diagnostikk. Målerens lokale klokke vises separat fra tidspunktet Home Assistant leste telegrammet.
 
-**Bruk bare i et isolert testmiljø inntil du har kontrollert egen måler, M-Bus-kobling og installasjonen.** Denne README-en beskriver gjeldende installasjon via **Repositories**. Se også [teknisk A–Å-veiledning](INSTALLASJON.md).
+## Installer
 
-## Legg til som custom app-repository
-
-Bruk **repository-URL-en**, ikke lenken til en GitHub Release, en ZIP-fil eller installasjonssiden:
+Legg til dette repositoryet under **Settings → Apps → Install app → ⋮ → Repositories → Add**:
 
 ```text
 https://github.com/astroctrl-dev/ha-mbus-energy-public
 ```
 
-**Viktig:** GitHub-taggen v1.0.0 er et tidligere øyeblikksbilde. Bruk URL-en over, uten tagg eller /releases, for oppdatert apptekst, dokumentasjon og repository-oppsett. Appens versjonsfelt er fortsatt 1.0.0.
+Åpne **M-Bus T230 energimåling**, velg **Install**, sett serieport og MQTT-tilgang i **Configuration**, trykk **Save**, og deretter **Start**. Bruk **Open Web UI** til å søke etter og legge til måleren. Søkefunn viser ID og primæradresse sammen. Les [installasjonsveiledningen](INSTALLASJON.md) før fysisk tilkobling og oppdatering.
 
-1. I den isolerte Home Assistant-instansen: åpne **Settings → Apps → Install app**.
-2. Åpne menyen øverst til høyre og velg **Repositories**.
-3. Lim inn URL-en ovenfor og velg **Add**. Lukk dialogen. Appen vises under **M-Bus energimåling** i appbutikken. Hvis den ikke vises med en gang, oppdater appbutikken.
-4. Åpne **M-Bus T230 energimåling** (v1.0.0) og velg **Install**.
-5. Kontroller at USB-adapteren er tilgjengelig i denne instansen. Installer og start MQTT-broker, og aktiver MQTT-integrasjonen.
-6. Åpne appens **Configuration**, velg faktisk serieport, baud, leseintervall og MQTT-tilgang, og trykk **Save**. Start appen under **Info** med **Start**.
-7. Åpne appens webgrensesnitt. Velg **Søk etter målere**, legg til ønskede målere, og kontroller enhetene under **Settings → Devices & services → MQTT**.
+## Målinger og historikk
 
-Ved endring i appens konfigurasjon: trykk **Save** og **Restart** appen. Du trenger ikke kopiere filer manuelt til `/local_apps` når du bruker denne repository-URL-en. Les [INSTALLASJON.md](INSTALLASJON.md) for kontroll og tilbakeføring.
+De sju eksisterende målesensorene og statusdiagnostikken er bevart. I tillegg vises **Målerens lokale tid**, **Sommertidsflagg** og **Siste vellykkede avlesning**. Målerens dato og tid gjengis slik de står i telegrammet, uten antatt UTC-konvertering. Sommertidsflagget er en separat diagnostikk.
 
-Ingen reelle måler-ID-er, private nettverksadresser, passord eller råtelegram inngår i dette repositoryet. Eventuelle testtelegram er syntetiske. Måler-ID `12345678` og primæradresse `7` er fiktive eksempler.
+Aktiver `allow_monthly_history` i **Configuration** og velg **Hent månedshistorikk** i **Open Web UI** når du ønsker historikk. Appen pauser normal polling, velger historisk ramme, leser opptil 24 akkumulerte energistander, gjenoppretter normalrammen og verifiserer den før polling fortsetter. Et uverifisert tilbakeskifte blokkerer normal polling. Tabellen viser 24 stander og 23 differanser ved komplett svar. En arkivposisjon er ikke en målt avregningsdato. Historikken registreres ikke som nytt forbruk i dagens Home Assistant Energy-periode.
 
-Koden sender bare M-Bus-leseforespørsler (REQ_UD2). Den skriver ikke oppsett til måleren. Støttede måleposter må finnes i gyldig telegram; ugyldig identitet eller avlesning gir ikke en ny verdi. Les [INSTALLASJON.md](INSTALLASJON.md) for verifisering, feilsøking og tilbakeføring.
+**Last ned analyse (.xlsx)** eksporterer lagrede validerte avlesninger og eventuell månedshistorikk. Nedlasting sender ingen kommando til måleren. Filen har et alias i stedet for måler-ID og inneholder ikke råtelegram eller tilgangsopplysninger. Den inneholder reelle måleverdier; kontroller den før deling.
 
-## Lokal verifisering
+Appen bruker minst 61 sekunder mellom busstilgangene, også ved omstart. Standard normalintervall er 120 sekunder. Tidligere v1-innstillinger på 10, 20, 30 og 60 sekunder godtas ved oppgradering og kjøres som 120 sekunder. Velg 90 sekunder eller mer i **Configuration** når du lagrer nye innstillinger.
 
-```sh
-PYTHONPATH=mbus_probe python3 -m unittest discover -s mbus_probe -v
-```
+Ingen ekte måler-ID eller private råtelegram finnes i dette repositoryet. Testfiksturen er syntetisk. Eksempel-ID `12345678` og adresse `7` er fiktive.
 
-Testene bruker syntetiske telegram og dekker blant annet målersøk, tidlig stopp, validering, MQTT og timeavlesning. Fysisk installasjon i et bestemt miljø må kontrolleres separat.
+## Dokumentasjon og verifisering
+
+- [Installasjon, oppdatering og tilbakeføring](INSTALLASJON.md)
+- [Appens dokumentasjon](mbus_probe/DOCS.md)
+
+Kjør offline-testene fra repositoryroten med `PYTHONPATH=mbus_probe python3 -m unittest discover -s mbus_probe -p 'test_*.py' -v`. Testene erstatter ikke kontroll av fysisk måler, klokke og tilkobling i eget oppsett.
