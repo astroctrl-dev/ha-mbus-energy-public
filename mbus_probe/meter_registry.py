@@ -19,7 +19,6 @@ class MeterRegistry:
         self.scan_status = "not_started"
         self.scan_progress = 0
         self.scan_errors = []
-        self.scan_stop = threading.Event()
         if self.path.exists():
             data = json.loads(self.path.read_text(encoding="utf-8"))
             self.pending_cleanup = data.get("pending_cleanup", [])
@@ -70,15 +69,8 @@ class MeterRegistry:
         with self.lock:
             ids = [row["meter_id"] for row in rows]
             if len(ids) != len(set(ids)):
-                raise RuntimeError("ambiguous duplicate meter identity")
+                raise ValueError("ambiguous duplicate meter identity")
             self.found = {row["meter_id"]: dict(row) for row in rows}
-
-    def add_found(self, row):
-        with self.lock:
-            previous = self.found.get(row["meter_id"])
-            if previous is not None and previous["address"] != row["address"]:
-                raise RuntimeError("ambiguous duplicate meter identity")
-            self.found[row["meter_id"]] = dict(row)
 
     def select(self, meter_id):
         with self.lock:

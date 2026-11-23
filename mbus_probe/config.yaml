@@ -1,7 +1,7 @@
 name: "M-Bus T230 energimåling"
-version: "1.0.0"
+version: "2.0.0"
 slug: "mbus_probe"
-description: "Finn T230-målere på M-Bus og vis måleverdier i Home Assistant via MQTT."
+description: "Les T230 via M-Bus, vis målinger med MQTT Discovery og hent historikk ved behov."
 arch:
   - amd64
 startup: application
@@ -10,6 +10,7 @@ init: false
 hassio_api: false
 homeassistant_api: false
 host_network: false
+uart: true
 ingress: true
 ingress_port: 8099
 panel_admin: true
@@ -18,16 +19,18 @@ options:
   baud: 2400
   interval_seconds: 120
   read_before_full_hour: false
+  allow_monthly_history: false
   seconds_before_full_hour: 5
-  mqtt_host: ""
+  mqtt_host: "core-mosquitto"
   mqtt_port: 1883
   mqtt_username: ""
   mqtt_password: ""
 schema:
   serial_port: device(subsystem=tty)
   baud: int
-  interval_seconds: list(10|20|30|60|120|300|600)
+  interval_seconds: list(10|20|30|60|90|120|300|600)
   read_before_full_hour: bool
+  allow_monthly_history: bool
   seconds_before_full_hour: int(0,300)
   mqtt_host: str
   mqtt_port: int

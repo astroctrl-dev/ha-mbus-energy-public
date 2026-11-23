@@ -5,6 +5,7 @@ The caller must set a broker Last Will of 'offline' on availability_topic.
 """
 import hashlib
 import json
+from datetime import datetime, timezone
 
 from ha_measurements import SENSORS, select_measurements
 
@@ -44,7 +45,10 @@ def discovery_messages(meter_id):
             payload["device_class"] = device_class
         messages.append((topic, json.dumps(payload), True))
     for kind, label in (("meter_status", "M-Bus status"),
-                        ("data_quality", "Datakvalitet")):
+                        ("data_quality", "Datakvalitet"),
+                        ("meter_local_time", "Målerklokke (lokal tid)"),
+                        ("meter_summer_time", "Målerens sommertidbit"),
+                        ("last_successful_read_utc", "Siste avlesning (UTC)")):
         topic = f"homeassistant/sensor/mbus_t230_{key}_{kind}/config"
         payload = {
             "name": label,
@@ -55,14 +59,25 @@ def discovery_messages(meter_id):
             "availability_mode": "all",
             "entity_category": "diagnostic",
         }
+        if kind == "last_successful_read_utc":
+            payload["device_class"] = "timestamp"
         messages.append((topic, json.dumps(payload), True))
     return messages
 
 
-def publish_reading(client, decoded, meter_id):
+def publish_reading(client, decoded, meter_id, read_at_utc=None):
     """Return selected values; availability goes online only after state messages."""
     values = select_measurements(decoded, meter_id)
     key = device_key(meter_id)
+    if read_at_utc is None:
+        read_at_utc = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    # A wall clock without an offset is text, never a HA timestamp. Require an
+    # unambiguous current record; a malformed clock does not block energy reads.
+    clocks = [record for record in decoded.get("records", [])
+              if record.get("kind") == "meter_local_time" and record.get("current_record")]
+    clock = clocks[0] if len(clocks) == 1 else None
+    clock_value = clock.get("value", "unknown") if clock else "unknown"
+    summer_time = ("summer" if clock["summer_time"] else "standard") if clock and isinstance(clock.get("summer_time"), bool) else "unknown"
     for topic, payload, retain in discovery_messages(meter_id):
         result = client.publish(topic, payload, qos=1, retain=retain)
         if result.rc:
@@ -75,7 +90,10 @@ def publish_reading(client, decoded, meter_id):
             raise ConnectionError("MQTT state publish failed")
         result.wait_for_publish(timeout=5)
     for kind, value in (("meter_status", f"0x{decoded['status']:02X}"),
-                        ("data_quality", "Advarsel" if decoded["status"] == 0x10 else "OK")):
+                        ("data_quality", "Advarsel" if decoded["status"] == 0x10 else "OK"),
+                        ("meter_local_time", clock_value),
+                        ("meter_summer_time", summer_time),
+                        ("last_successful_read_utc", read_at_utc)):
         result = client.publish(f"mbus/t230/{key}/{kind}/state", value,
                                 qos=1, retain=False)
         if result.rc:

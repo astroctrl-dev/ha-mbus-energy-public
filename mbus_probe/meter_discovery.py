@@ -4,15 +4,12 @@ from ha_measurements import select_measurements
 
 
 def scan_bus(port, baud, registry, bus_lock, stop):
+    rows = []
     errors = []
     try:
         for address in range(251):
             if stop.is_set():
                 raise RuntimeError("scan interrupted")
-            if registry.scan_stop.is_set():
-                with registry.lock:
-                    registry.scan_status = "stopped"
-                return
             with registry.lock:
                 registry.scan_progress = address
             try:
@@ -32,12 +29,15 @@ def scan_bus(port, baud, registry, bus_lock, stop):
                     supported = True
                 except ValueError:
                     supported = False
-                registry.add_found({"meter_id": decoded["meter_id"], "address": address,
-                                    "manufacturer": decoded.get("manufacturer", "unknown"),
-                                    "supported": supported})
+                rows.append({"meter_id": decoded["meter_id"], "address": address,
+                             "manufacturer": decoded.get("manufacturer", "unknown"),
+                             "supported": supported})
+                # Expose the ID and primary address as soon as the reply is validated.
+                registry.set_found(rows)
             except (OSError, ValueError) as exc:
                 # Do not log the raw response or imply a collision can be identified.
                 errors.append({"address": address, "reason": type(exc).__name__})
+        registry.set_found(rows)
         with registry.lock:
             registry.scan_errors = errors
             registry.scan_progress = 251

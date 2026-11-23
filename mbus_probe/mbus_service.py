@@ -1,8 +1,12 @@
 """Read-only, sequential M-Bus polling for selected T230 meters."""
 import json
 import logging
+import os
 import signal
 import threading
+import time
+from datetime import datetime, timezone
+from analysis_export import append_sample, make_sample
 from pathlib import Path
 from contextlib import nullcontext
 
@@ -18,6 +22,41 @@ from meter_ui import serve
 LOG = logging.getLogger("mbus")
 STOP = threading.Event()
 _STATUS_10_LOGGED = False  # One informational warning per process start.
+_ANALYSIS_SAVE_ERROR_LOGGED = False
+
+
+class RequestPacer:
+    """Persist the last attempted normal read so a restart cannot poll immediately."""
+
+    def __init__(self, path="/data/analysis/last_bus_request", clock=time.time):
+        self.path = Path(path)
+        self.clock = clock
+
+    def before_request(self, stop):
+        try:
+            last = float(self.path.read_text(encoding="ascii"))
+            if not 0 <= last < 1e12:
+                raise ValueError("invalid last request time")
+        except FileNotFoundError:
+            last = None
+        now = self.clock()
+        # Missing/corrupt clock provenance must never shorten the interval.
+        delay = 61.0 if last is None or now < last else max(0.0, 61.0 - (now - last))
+        if stop.wait(delay):
+            return False
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        temp = self.path.with_suffix(".tmp")
+        try:
+            with temp.open("w", encoding="ascii") as stream:
+                stream.write(str(self.clock()) + "\n")
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.chmod(temp, 0o600)
+            os.replace(temp, self.path)
+        finally:
+            if temp.exists():
+                temp.unlink()
+        return True
 
 
 def load_config(path="/data/options.json"):
@@ -28,8 +67,14 @@ def load_config(path="/data/options.json"):
         raise ValueError("mqtt_host is required")
     if not 0 <= int(config.get("address", 0)) <= 250:
         raise ValueError("address outside 0..250")
-    if int(config.get("interval_seconds", 120)) not in (10, 20, 30, 60, 120, 300, 600):
-        raise ValueError("interval_seconds must be one of 10, 20, 30, 60, 120, 300, 600")
+    interval = int(config.get("interval_seconds", 120))
+    if interval in (10, 20, 30, 60):
+        LOG.warning("Legacy read interval %d s raised to 120 s for meter pacing", interval)
+        config["interval_seconds"] = 120
+    elif interval not in (90, 120, 300, 600):
+        raise ValueError("interval_seconds must be one of 90, 120, 300, 600")
+    if not isinstance(config.get("allow_monthly_history", False), bool):
+        raise ValueError("allow_monthly_history must be boolean")
     if not isinstance(config.get("read_before_full_hour", False), bool):
         raise ValueError("read_before_full_hour must be boolean")
     delay = config.get("seconds_before_full_hour", 5)
@@ -39,7 +84,7 @@ def load_config(path="/data/options.json"):
 
 
 def poll_once(config, client):
-    global _STATUS_10_LOGGED
+    global _STATUS_10_LOGGED, _ANALYSIS_SAVE_ERROR_LOGGED
     tx, rx = read_one(config.get("serial_port", "/dev/ttyUSB0"),
                       int(config.get("baud", 2400)),
                       int(config.get("address", 0)), timeout=4)
@@ -57,13 +102,28 @@ def poll_once(config, client):
             "Intentionally logging only its first occurrence per app start "
             "to avoid flooding the log.", int(config.get("address", 0))
         )
-    publish_reading(client, decoded, config["meter_id"])
+    read_at_utc = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    publish_reading(client, decoded, config["meter_id"], read_at_utc=read_at_utc)
+    try:
+        sample = make_sample(decoded, config["meter_id"],
+                             read_at_utc,
+                             "/data/analysis/alias.key")
+        append_sample("/data/analysis/normal.jsonl", sample)
+        _ANALYSIS_SAVE_ERROR_LOGGED = False
+    except (OSError, ValueError) as exc:
+        if not _ANALYSIS_SAVE_ERROR_LOGGED:
+            _ANALYSIS_SAVE_ERROR_LOGGED = True
+            LOG.warning("Analysis sample could not be saved: %s", type(exc).__name__)
     return selected
 
 
-def run(config, client, registry=None, bus_lock=None):
+def run(config, client, registry=None, bus_lock=None, history_controller=None, request_pacer=None):
     """Fail closed on any bad poll. MQTT Last Will also handles abrupt termination."""
     while not STOP.is_set():
+        if history_controller and history_controller.blocked.is_set():
+            client.publish(BRIDGE_AVAILABILITY, "offline", qos=1, retain=True)
+            STOP.wait(5)
+            continue
         if registry:
             for meter_id in list(registry.pending_cleanup):
                 try:
@@ -80,10 +140,14 @@ def run(config, client, registry=None, bus_lock=None):
             meter_config = dict(config, meter_id=row["meter_id"], address=row["address"])
             try:
                 with bus_lock if bus_lock else nullcontext():
+                    if STOP.is_set() or (history_controller and history_controller.blocked.is_set()):
+                        continue
                     if registry:
                         with registry.lock:
                             if registry.selected.get(row["meter_id"]) != row["address"]:
                                 continue
+                    if request_pacer and not request_pacer.before_request(STOP):
+                        continue
                     values = poll_once(meter_config, client)
                 LOG.info("Valid T230 read: %d current measurements", len(values))
             except (OSError, ValueError, ConnectionError, RuntimeError) as exc:
@@ -129,7 +193,7 @@ def main():
     client.loop_start()
     server = serve(registry, config, client, bus_lock, STOP)
     try:
-        run(config, client, registry, bus_lock)
+        run(config, client, registry, bus_lock, server.history_controller, RequestPacer())
     finally:
         try:
             server.shutdown()

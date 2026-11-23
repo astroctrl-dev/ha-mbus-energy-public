@@ -1,0 +1,26 @@
+name: M-Bus V2 validation
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile Python
+        run: python -m compileall -q mbus_probe
+      - name: Install test dependency
+        run: python -m pip install openpyxl==3.1.5
+      - name: Offline tests
+        run: PYTHONPATH=mbus_probe python -m unittest discover -s mbus_probe -p 'test_*.py' -v
+      - name: Build Home Assistant app image
+        run: docker build -t mbus-v2-ci ./mbus_probe
+      - name: Verify runtime imports
+        run: docker run --rm --entrypoint python3 mbus-v2-ci -c 'import mbus_service, meter_ui, monthly_diagnostic, analysis_export, history_controller, history_model, clock_model'
