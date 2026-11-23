@@ -67,7 +67,11 @@ def load_config(path="/data/options.json"):
         raise ValueError("mqtt_host is required")
     if not 0 <= int(config.get("address", 0)) <= 250:
         raise ValueError("address outside 0..250")
-    if int(config.get("interval_seconds", 120)) not in (90, 120, 300, 600):
+    interval = int(config.get("interval_seconds", 120))
+    if interval in (10, 20, 30, 60):
+        LOG.warning("Legacy read interval %d s raised to 120 s for meter pacing", interval)
+        config["interval_seconds"] = 120
+    elif interval not in (90, 120, 300, 600):
         raise ValueError("interval_seconds must be one of 90, 120, 300, 600")
     if not isinstance(config.get("allow_monthly_history", False), bool):
         raise ValueError("allow_monthly_history must be boolean")
