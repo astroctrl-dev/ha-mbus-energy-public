@@ -1,7 +1,7 @@
 """Regression: history entities exist before the first history capture."""
 import unittest
 from unittest.mock import patch
-from mbus_service import publish_saved_history
+from mbus_service import publish_saved_history, publish_history_discovery
 from mqtt_bridge import history_discovery_messages
 
 
@@ -30,6 +30,11 @@ class Registry:
 
 
 class HistoryDiscoveryTests(unittest.TestCase):
+    def test_confirmed_discovery_count(self):
+        client = Client()
+        self.assertEqual(publish_history_discovery(client, "12345678"), 47)
+        self.assertEqual(len(client.messages), 47)
+
     @patch("mbus_service.load_history", return_value=[])
     def test_discovery_without_saved_history(self, _load):
         client = Client()
