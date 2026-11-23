@@ -20,7 +20,7 @@ Aktiver `allow_monthly_history` i **Configuration** og velg **Hent månedshistor
 
 **Last ned analyse (.xlsx)** eksporterer lagrede validerte avlesninger og eventuell månedshistorikk. Nedlasting sender ingen kommando til måleren. Filen har et alias i stedet for måler-ID og inneholder ikke råtelegram eller tilgangsopplysninger. Den inneholder reelle måleverdier; kontroller den før deling.
 
-Appen bruker minst 61 sekunder mellom busstilgangene, også ved omstart. Standard normalintervall er 120 sekunder. Tidligere v1-innstillinger på 10, 20, 30 og 60 sekunder godtas ved oppgradering og kjøres som 120 sekunder. Velg 90 sekunder eller mer i **Configuration** når du lagrer nye innstillinger.
+Ordinære avlesninger av samme måler er sperret i minst 61 sekunder, også ved omstart. Et adressesøk prøver ulike primæradresser og skal ikke startes gjentatte ganger mot samme måler. Standard normalintervall er 120 sekunder. Tidligere v1-innstillinger på 10, 20, 30 og 60 sekunder godtas ved oppgradering og kjøres som 120 sekunder. Velg 90 sekunder eller mer i **Configuration** når du lagrer nye innstillinger.
 
 Ingen ekte måler-ID eller private råtelegram finnes i dette repositoryet. Testfiksturen er syntetisk. Eksempel-ID `12345678` og adresse `7` er fiktive.
 
