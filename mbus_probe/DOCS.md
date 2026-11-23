@@ -8,7 +8,7 @@ Appen leser Landis+Gyr T230 via kablet M-Bus og publiserer gyldige aktuelle post
 | --- | --- |
 | `serial_port` | Serieenheten som faktisk er tilgjengelig i Home Assistant OS. |
 | `baud` | Hastigheten dokumentert for måleren. |
-| `interval_seconds` | Normal lesing: 90, 120, 300 eller 600 sekunder; standard 120. Eldre v1-valg under 90 kjøres som 120 ved oppgradering. |
+| `interval_seconds` | Normal lesing: 90, 120, 300 eller 600 sekunder; standard 120. Eldre v1-valg under 90 vises fremdeles for kompatibilitet, men kjøres som 120. Velg 90 eller høyere når du lagrer nye innstillinger. |
 | `read_before_full_hour` | Valgfri ekstra lesing før hel time, med minst 61 sekunder mellom busstilgangene. |
 | `seconds_before_full_hour` | Forskyvning 0–300 sekunder. |
 | `allow_monthly_history` | Aktiverer separat historikkhandling i webgrensesnittet. |
