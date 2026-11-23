@@ -20,6 +20,8 @@ class FakeClient:
             rc = 0
             def wait_for_publish(self, timeout=None):
                 pass
+            def is_published(self):
+                return True
         return Result()
 
 
