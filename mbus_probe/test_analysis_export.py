@@ -1,0 +1,71 @@
+import tempfile
+import unittest
+from pathlib import Path
+from io import BytesIO
+from openpyxl import load_workbook
+
+from mbus_probe import validate
+from ha_measurements import select_measurements
+from analysis_export import append_sample, load_samples, make_sample, make_xlsx
+
+
+class AnalysisExportTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        fixture = Path(__file__).with_name("fixture_t230_sanitized.hex")
+        cls.decoded = validate(bytes.fromhex(fixture.read_text()))
+
+    def test_sanitized_normal_records_and_bounded_persistence(self):
+        select_measurements(self.decoded, "00000000")
+        with tempfile.TemporaryDirectory() as tmp:
+            key = Path(tmp) / "alias.key"
+            path = Path(tmp) / "samples.jsonl"
+            sample = make_sample(self.decoded, "00000000", "2026-11-23T02:00:00Z", key)
+            self.assertTrue(sample["alias"].startswith("Meter-"))
+            self.assertEqual(sample["meter_local_time"], next(r["value"] for r in self.decoded["records"] if r.get("kind") == "meter_local_time" and r.get("current_record")))
+            self.assertTrue(any(r["kind"] == "energy" for r in sample["records"]))
+            append_sample(path, sample, limit=2)
+            append_sample(path, sample, limit=2)
+            append_sample(path, sample, limit=2)
+            self.assertEqual(len(load_samples(path)), 2)
+            self.assertNotIn("00000000", path.read_text())
+            self.assertNotIn("raw_hex", path.read_text())
+            self.assertNotIn("meter_id", path.read_text())
+            self.assertEqual(sample["alias"],
+                             make_sample(self.decoded, "00000000", "2026-11-23T02:00:00Z", key)["alias"])
+
+    def test_workbook_contains_values_and_provenance(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            sample = make_sample(self.decoded, "00000000", "2026-11-23T02:00:00Z",
+                                 Path(tmp) / "alias.key")
+            payload = make_xlsx([sample])
+        wb = load_workbook(BytesIO(payload), read_only=True, data_only=True)
+        self.assertEqual(wb.sheetnames, ["Info", "Normal records"])
+        rows = list(wb["Normal records"].values)
+        self.assertEqual(rows[0][0:3], ("alias", "read_at_utc", "meter_local_time"))
+        energy = [r for r in rows[1:] if r[5] == "energy" and r[6] == 0 and r[7] == 0]
+        self.assertEqual(energy[0][10:12], (12345, "kWh"))
+        self.assertNotIn("00000000", str(rows))
+        self.assertEqual(list(wb["Info"].values)[3][1],
+                         "Unspecified; local meter time is not UTC")
+
+    def test_history_has_24_stands_and_23_differences(self):
+        from history_model import build_snapshot
+        months = [{"month_back": n, "value": 1000 - 10*n, "unit": "kWh"}
+                  for n in range(1, 25)]
+        history = build_snapshot(months, "2026-11-23T02:00:00Z")
+        wb = load_workbook(BytesIO(make_xlsx([], history)), read_only=True, data_only=True)
+        self.assertEqual(len(list(wb["Månedshistorikk"].values)), 25)
+        self.assertEqual(len(list(wb["Månedsforbruk"].values)), 24)
+        self.assertEqual(list(wb["Månedsforbruk"].values)[1][3], 10)
+        self.assertIsNone(list(wb["Månedshistorikk"].values)[1][4])
+
+    def test_no_unvalidated_or_incomplete_export(self):
+        with self.assertRaises(ValueError):
+            make_xlsx([])
+        with self.assertRaises(ValueError):
+            make_xlsx([], {"stands": [], "bounded_periods": []})
+
+
+if __name__ == "__main__":
+    unittest.main()
