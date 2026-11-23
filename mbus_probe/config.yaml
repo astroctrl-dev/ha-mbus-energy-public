@@ -28,7 +28,7 @@ options:
 schema:
   serial_port: device(subsystem=tty)
   baud: int
-  interval_seconds: list(90|120|300|600)
+  interval_seconds: list(10|20|30|60|90|120|300|600)
   read_before_full_hour: bool
   allow_monthly_history: bool
   seconds_before_full_hour: int(0,300)
