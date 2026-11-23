@@ -19,7 +19,7 @@ from mqtt_bridge import (BRIDGE_AVAILABILITY, cleanup_discovery,
 from meter_registry import MeterRegistry
 from meter_ui import serve
 from history_controller import load_history
-from mqtt_bridge import publish_history
+from mqtt_bridge import publish_history, history_discovery_messages
 
 LOG = logging.getLogger("mbus")
 STOP = threading.Event()
@@ -188,6 +188,14 @@ def on_broker_connect(client, registry):
 def publish_saved_history(client, registry):
     """Run outside Paho's on_connect callback so PUBACKs can be processed."""
     try:
+        # Register historical entities even before the first history capture.
+        # Keep the same unique IDs so upgrades do not duplicate entities.
+        for row in registry.snapshot()["selected"]:
+            for topic, payload, retain in history_discovery_messages(row["meter_id"]):
+                result = client.publish(topic, payload, qos=1, retain=retain)
+                if result.rc:
+                    raise ConnectionError("MQTT history discovery publish failed")
+                result.wait_for_publish(timeout=5)
         for alias, snapshot in load_history("/data/analysis", registry.snapshot()["selected"]):
             # Match saved alias to the selected meter without exposing its ID.
             from history_controller import history_file
