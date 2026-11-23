@@ -16,11 +16,6 @@ class HourlyConfigTests(unittest.TestCase):
             path.write_text(json.dumps(cfg), encoding="utf-8")
             return load_config(path)
 
-    def test_legacy_short_intervals_are_safely_migrated(self):
-        for interval in (10, 20, 30, 60):
-            self.assertEqual(self.load(interval_seconds=interval)["interval_seconds"], 120)
-        self.assertEqual(self.load(interval_seconds=90)["interval_seconds"], 90)
-
     def test_legacy_config_without_hourly_options(self):
         self.assertNotIn("read_before_full_hour", self.load())
 

@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from hashlib import sha256
 from io import BytesIO
 from pathlib import Path
+from ha_measurements import SENSORS
 
 ALLOWED_KINDS = {
     "energy", "volume", "power", "flow", "flow_temperature",
@@ -35,7 +36,7 @@ def _alias(meter_id, key_path):
     return "Meter-" + hmac.new(key, meter_id.encode("ascii"), sha256).hexdigest()[:12]
 
 
-def make_sample(decoded, meter_id, read_at, alias_key):
+def make_sample(decoded, meter_id, read_at, alias_key, validated=None):
     """Call only after a validated normal frame passes select_measurements."""
     stamp = datetime.fromisoformat(read_at.replace("Z", "+00:00"))
     if stamp.tzinfo is None or stamp.utcoffset() is None:
@@ -48,7 +49,17 @@ def make_sample(decoded, meter_id, read_at, alias_key):
     summer_time = clock[0].get("summer_time") if len(clock) == 1 else None
     records = []
     for r in decoded["records"]:
-        if r.get("kind") not in ALLOWED_KINDS:
+        kind = r.get("kind")
+        if kind not in ALLOWED_KINDS:
+            continue
+        # An invalid or ambiguous current metric must not be exported as a
+        # validated value just because another metric in the frame was valid.
+        is_current = (r.get("storage") == 0 and r.get("tariff") == 0
+                      and r.get("subunit", 0) == 0
+                      and (r.get("function") == 0 or kind == "missing_time"
+                           and r.get("function") == 3))
+        if (validated is not None and kind in SENSORS and is_current
+                and kind not in validated):
             continue
         value = r.get("value")
         if type(value) not in (int, float) or not (abs(value) < 1e15):
@@ -97,7 +108,7 @@ def make_xlsx(samples, history=None):
                 ("Normal read count", len(samples)),
                 ("History status", "Validated snapshot" if history else "Not available"),
                 ("Meter timezone", "Unspecified; local meter time is not UTC"),
-                ("Historical dates", "Unverified unless explicitly documented"),
+                ("Historical dates", "Meter storage time unverified; first-of-month estimates labeled separately"),
                 ("Export", "Decoded values only; no raw frames or actual meter ID")):
         info.append(row)
     ws = wb.create_sheet("Normal records")
@@ -112,22 +123,32 @@ def make_xlsx(samples, history=None):
         histories = [("", history)] if isinstance(history, dict) else list(history)
         stands = wb.create_sheet("Månedshistorikk")
         stands.append(("alias", "storage", "month_back", "cumulative_kwh",
-                       "meter_date", "date_source", "captured_at_utc"))
+                       "meter_date", "estimated_date", "date_source", "captured_at_utc",
+                       "rollover_evidence"))
         periods = wb.create_sheet("Månedsforbruk")
         periods.append(("alias", "newer_storage", "older_storage", "period_kwh",
-                        "meter_start_date", "meter_end_date", "date_source"))
+                        "meter_start_date", "meter_end_date", "estimated_start_date",
+                        "estimated_end_date", "date_source", "rollover_evidence"))
         for alias, snapshot in histories:
+            provenance = snapshot.get("date_provenance", {})
+            for field in ("history_read_at_utc", "normal_read_at_utc",
+                          "meter_local_time_at_normal", "meter_summer_time_at_normal",
+                          "clock_trusted_at_capture", "clock_trust_verified_at_utc",
+                          "timezone_assumed", "rule", "estimate_applied"):
+                info.append((f"{alias} / {field}", provenance.get(field)))
             if (len(snapshot.get("stands", ())) != 24 or
                     len(snapshot.get("bounded_periods", ())) != 23):
                 raise ValueError("incomplete history snapshot")
             for r in snapshot["stands"]:
                 stands.append((alias, r["storage"], r["month_back"], r["cumulative_kwh"],
-                               r["meter_date"], r["date_source"],
-                               snapshot["captured_at_utc"]))
+                               r["meter_date"], r.get("estimated_date"), r["date_source"],
+                               snapshot["captured_at_utc"], snapshot.get("rollover_evidence", "not_observed")))
             for r in snapshot["bounded_periods"]:
                 periods.append((alias,) + tuple(r.get(k) for k in
                                ("newer_storage", "older_storage", "period_kwh",
-                                "meter_start_date", "meter_end_date", "date_source")))
+                                "meter_start_date", "meter_end_date", "estimated_start_date",
+                                "estimated_end_date", "date_source")) +
+                               (snapshot.get("rollover_evidence", "not_observed"),))
     for sheet in wb:
         sheet.freeze_panes = "A2"
         sheet.auto_filter.ref = sheet.dimensions

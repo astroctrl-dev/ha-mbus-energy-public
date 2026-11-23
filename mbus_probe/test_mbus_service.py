@@ -67,8 +67,8 @@ class ServiceTests(unittest.TestCase):
              patch("mbus_service.validate", return_value=self.decoded):
             values = poll_once({"meter_id": "00000000", "address": 0}, client)
         self.assertEqual(values["energy"], 12345)
-        # 12 Discovery configs + 7 measurements + 5 diagnostics + availability
-        self.assertEqual(len(client.messages), 25)
+        # 15 Discovery configs + 10 measurements + 5 diagnostics + availability
+        self.assertEqual(len(client.messages), 31)
         states = {topic.rsplit("/", 2)[-2]: payload for topic, payload, _, _
                   in client.messages if topic.endswith("/state")}
         self.assertRegex(states["last_successful_read_utc"],
@@ -149,6 +149,38 @@ class ServiceTests(unittest.TestCase):
                         if topic.endswith("/availability")]
         self.assertEqual(availability, ["offline", "online"])
 
+    def test_startup_clock_waits_for_first_fresh_measurement(self):
+        initial_read = threading.Event()
+        checked = []
+        class ObservedClient(FakeClient):
+            def publish(self, topic, payload, qos, retain):
+                self_outer.assertFalse(initial_read.is_set()) if payload == "online" else None
+                return super().publish(topic, payload, qos, retain)
+        self_outer = self
+        client = ObservedClient()
+        class StopAfterTwo:
+            calls = 0
+            def is_set(self):
+                return self.calls >= 2
+            def wait(self, _seconds):
+                self.calls += 1
+                if self.calls == 1:
+                    self_outer.assertFalse(initial_read.is_set())
+                else:
+                    self_outer.assertTrue(initial_read.is_set())
+        def on_valid_round(meter_ids):
+            checked.append(meter_ids)
+            initial_read.set()
+        with patch("mbus_service.STOP", StopAfterTwo()), \
+             patch("mbus_service.read_one", side_effect=[OSError("timeout"), (b"", b"frame")]), \
+             patch("mbus_service.validate", return_value=self.decoded):
+            run({"meter_id": "00000000", "address": 0, "interval_seconds": 120},
+                client, on_valid_round=on_valid_round)
+        self.assertTrue(initial_read.is_set())
+        self.assertEqual(checked, [["00000000"]])
+        self.assertTrue(any(topic.endswith("/availability") and payload == "online"
+                            for topic, payload, _, _ in client.messages))
+
     def test_two_selected_meters_poll_sequentially_with_distinct_topics(self):
         with tempfile.TemporaryDirectory() as directory:
             registry = MeterRegistry(Path(directory) / "meters.json")
@@ -201,7 +233,9 @@ class ServiceTests(unittest.TestCase):
             registry.select("00000000")
             registry.select("12345678")
             client = FakeClient()
-            on_broker_connect(client, registry)
+            with patch("mbus_service.publish_history") as history:
+                on_broker_connect(client, registry)
+                history.assert_not_called()  # No QoS waits on Paho callback thread.
             self.assertEqual([payload for _, payload, _, _ in client.messages],
                              ["offline", "offline", "offline", "online"])
             self.assertEqual(len({topic for topic, payload, _, _ in client.messages

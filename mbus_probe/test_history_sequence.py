@@ -55,8 +55,10 @@ class HistorySequenceTests(unittest.TestCase):
              patch("monthly_diagnostic.validate", return_value=self.decoded), \
              patch("monthly_diagnostic.verify_normal_frame", return_value={"energy": 1}) as verify, \
              patch("monthly_diagnostic.time.sleep") as sleep:
-            months = run("/dev/test", 2400, 0, "00000000")
+            months, normal_clock, history_read_at = run("/dev/test", 2400, 0, "00000000")
         self.assertEqual(len(months), 24)
+        self.assertIsNone(normal_clock)
+        self.assertIsInstance(history_read_at, str)
         self.assertEqual(len(serial.writes), 4)
         self.assertEqual(serial.writes[0], bytes.fromhex("68 04 04 68 53 00 50 03 a6 16"))
         self.assertEqual(serial.writes[2], bytes.fromhex("68 03 03 68 53 00 50 a3 16"))

@@ -1,4 +1,4 @@
-name: M-Bus V2 validation
+name: M-Bus 2.1 validation
 on:
   pull_request:
   push:
@@ -23,4 +23,4 @@ jobs:
       - name: Build Home Assistant app image
         run: docker build -t mbus-v2-ci ./mbus_probe
       - name: Verify runtime imports
-        run: docker run --rm --entrypoint python3 mbus-v2-ci -c 'import mbus_service, meter_ui, monthly_diagnostic, analysis_export, history_controller, history_model, clock_model'
+        run: docker run --rm --entrypoint python3 mbus-v2-ci -c 'import mbus_service, meter_ui, monthly_diagnostic, analysis_export, history_controller, history_model, clock_model, clock_maintenance'

@@ -12,12 +12,14 @@ from contextlib import nullcontext
 
 from poll_schedule import next_poll_wait
 
-from ha_measurements import select_measurements
+from ha_measurements import SENSORS, select_measurements
 from mbus_probe import read_one, validate
 from mqtt_bridge import (BRIDGE_AVAILABILITY, cleanup_discovery,
                          mark_unavailable, publish_reading)
 from meter_registry import MeterRegistry
 from meter_ui import serve
+from history_controller import load_history
+from mqtt_bridge import publish_history
 
 LOG = logging.getLogger("mbus")
 STOP = threading.Event()
@@ -67,12 +69,17 @@ def load_config(path="/data/options.json"):
         raise ValueError("mqtt_host is required")
     if not 0 <= int(config.get("address", 0)) <= 250:
         raise ValueError("address outside 0..250")
-    interval = int(config.get("interval_seconds", 120))
-    if interval in (10, 20, 30, 60):
-        LOG.warning("Legacy read interval %d s raised to 120 s for meter pacing", interval)
-        config["interval_seconds"] = 120
-    elif interval not in (90, 120, 300, 600):
+    if int(config.get("interval_seconds", 120)) not in (90, 120, 300, 600):
         raise ValueError("interval_seconds must be one of 90, 120, 300, 600")
+    if not isinstance(config.get("allow_clock_sync", False), bool) or not isinstance(config.get("auto_clock_sync", False), bool):
+        raise ValueError("clock sync options must be boolean")
+    if config.get("auto_clock_sync") and not config.get("allow_clock_sync"):
+        raise ValueError("auto_clock_sync requires allow_clock_sync")
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+    try:
+        ZoneInfo(config.get("clock_timezone", "Europe/Oslo"))
+    except (ZoneInfoNotFoundError, TypeError, ValueError):
+        raise ValueError("invalid clock_timezone")
     if not isinstance(config.get("allow_monthly_history", False), bool):
         raise ValueError("allow_monthly_history must be boolean")
     if not isinstance(config.get("read_before_full_hour", False), bool):
@@ -91,7 +98,7 @@ def poll_once(config, client):
     decoded = validate(rx)
     if decoded.get("address") != int(config.get("address", 0)):
         raise ValueError("response primary address mismatch")
-    # Reject invalid or unexpected data before publishing any state.
+    # Frame identity is mandatory; individual measurement errors stay isolated.
     selected = select_measurements(decoded, config["meter_id"])
     if decoded.get("status") == 0x10 and not _STATUS_10_LOGGED:
         _STATUS_10_LOGGED = True
@@ -107,7 +114,7 @@ def poll_once(config, client):
     try:
         sample = make_sample(decoded, config["meter_id"],
                              read_at_utc,
-                             "/data/analysis/alias.key")
+                             "/data/analysis/alias.key", validated=selected)
         append_sample("/data/analysis/normal.jsonl", sample)
         _ANALYSIS_SAVE_ERROR_LOGGED = False
     except (OSError, ValueError) as exc:
@@ -117,7 +124,8 @@ def poll_once(config, client):
     return selected
 
 
-def run(config, client, registry=None, bus_lock=None, history_controller=None, request_pacer=None):
+def run(config, client, registry=None, bus_lock=None, history_controller=None,
+        request_pacer=None, on_valid_round=None):
     """Fail closed on any bad poll. MQTT Last Will also handles abrupt termination."""
     while not STOP.is_set():
         if history_controller and history_controller.blocked.is_set():
@@ -136,6 +144,7 @@ def run(config, client, registry=None, bus_lock=None, history_controller=None, r
                     LOG.warning("Pending MQTT cleanup failed: %s", exc)
         selections = (registry.snapshot()["selected"] if registry else
                       [{"meter_id": config["meter_id"], "address": config.get("address", 0)}])
+        valid_meter_ids = []
         for row in selections:
             meter_config = dict(config, meter_id=row["meter_id"], address=row["address"])
             try:
@@ -149,13 +158,19 @@ def run(config, client, registry=None, bus_lock=None, history_controller=None, r
                     if request_pacer and not request_pacer.before_request(STOP):
                         continue
                     values = poll_once(meter_config, client)
-                LOG.info("Valid T230 read: %d current measurements", len(values))
+                LOG.info("Valid T230 frame: %d current measurements, %d unavailable",
+                         len(values), len(SENSORS) - len(values))
+                valid_meter_ids.append(row["meter_id"])
             except (OSError, ValueError, ConnectionError, RuntimeError) as exc:
                 LOG.warning("T230 unavailable at primary address %d: %s", row["address"], exc)
                 try:
                     mark_unavailable(client, row["meter_id"])
                 except (OSError, ValueError, ConnectionError, RuntimeError) as mqtt_error:
                     LOG.warning("Cannot publish offline state: %s", mqtt_error)
+        # Start optional clock checks only after every selected meter had its
+        # chance to publish a fresh normal measurement in this round.
+        if valid_meter_ids and on_valid_round:
+            on_valid_round(valid_meter_ids)
         STOP.wait(next_poll_wait(config.get("interval_seconds", 120),
                                  config.get("read_before_full_hour", False),
                                  config.get("seconds_before_full_hour", 5)))
@@ -169,6 +184,21 @@ def on_broker_connect(client, registry):
     client.publish(BRIDGE_AVAILABILITY, "online", qos=1, retain=True)
 
 
+
+def publish_saved_history(client, registry):
+    """Run outside Paho's on_connect callback so PUBACKs can be processed."""
+    try:
+        for alias, snapshot in load_history("/data/analysis", registry.snapshot()["selected"]):
+            # Match saved alias to the selected meter without exposing its ID.
+            from history_controller import history_file
+            for row in registry.snapshot()["selected"]:
+                if history_file("/data/analysis", row["meter_id"]).stem == alias:
+                    publish_history(client, row["meter_id"], snapshot)
+                    break
+    except (OSError, ValueError, ConnectionError):
+        LOG.warning("Saved monthly history could not be published after broker reconnect")
+
+
 def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     config = load_config()
@@ -178,9 +208,17 @@ def main():
     import paho.mqtt.client as mqtt
     client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
                          client_id="mbus_t230_bridge")
+    history_publish_lock = threading.Lock()
     def on_connect(mqtt_client, _userdata, _flags, reason_code, _properties):
         if not reason_code.is_failure:
             on_broker_connect(mqtt_client, registry)
+            if history_publish_lock.acquire(blocking=False):
+                def republish():
+                    try:
+                        publish_saved_history(mqtt_client, registry)
+                    finally:
+                        history_publish_lock.release()
+                threading.Thread(target=republish, daemon=True).start()
     client.on_connect = on_connect
     username = config.get("mqtt_username")
     if username:
@@ -192,8 +230,12 @@ def main():
                    keepalive=60)
     client.loop_start()
     server = serve(registry, config, client, bus_lock, STOP)
+    if config.get("auto_clock_sync"):
+        for row in registry.snapshot()["selected"]:
+            server.clock_controller.defer_auto(row["meter_id"])
     try:
-        run(config, client, registry, bus_lock, server.history_controller, RequestPacer())
+        run(config, client, registry, bus_lock, server.history_controller, RequestPacer(),
+            server.clock_controller.on_valid_round)
     finally:
         try:
             server.shutdown()

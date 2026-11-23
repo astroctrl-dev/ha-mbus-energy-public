@@ -6,6 +6,8 @@ import argparse
 import json
 import sys
 import time
+from datetime import datetime, timezone
+from clock_model import clock_observation
 from mbus_probe import validate
 from ha_measurements import select_measurements
 
@@ -85,6 +87,9 @@ def run(port, baud, address, meter_id, timeout=5):
         ser.reset_input_buffer()
         selected = False
         last_request_at = None
+        months = None
+        normal_clock = None
+        history_read_at_utc = None
         try:
             selected = True  # Attempt restore even if write/ACK fails.
             last_request_at = time.monotonic()
@@ -100,10 +105,11 @@ def run(port, baud, address, meter_id, timeout=5):
             ser.write(req)
             ser.flush()
             frame = read_response(ser)
+            history_read_at_utc = datetime.now(timezone.utc).isoformat()
             header = validate(frame)
             if header.get("address") != address or header.get("control") not in (8, 24):
                 raise ValueError("monthly response address/control mismatch")
-            return extract_months(frame, meter_id)
+            months = extract_months(frame, meter_id)
         finally:
             if selected:
                 try:
@@ -118,11 +124,18 @@ def run(port, baud, address, meter_id, timeout=5):
                     req = bytes((0x10, 0x5B, address, (0x5B + address) & 255, 0x16))
                     ser.write(req)
                     ser.flush()
-                    verify_normal_frame(read_response(ser), address, meter_id)
+                    normal_frame = read_response(ser)
+                    verify_normal_frame(normal_frame, address, meter_id)
+                    try:
+                        normal_clock = clock_observation(
+                            validate(normal_frame), datetime.now(timezone.utc).isoformat())
+                    except (ValueError, KeyError):
+                        normal_clock = None  # Valid history stays available without a usable clock.
                     # Leave the bus idle before regular polling resumes.
                     time.sleep(61)
                 except Exception as exc:
                     raise RestorationError("normal frame not verified; stop polling") from exc
+        return months, normal_clock, history_read_at_utc
 
 
 def main():
@@ -136,7 +149,7 @@ def main():
     if not args.confirm_interface_reset:
         p.error("requires explicit --confirm-interface-reset after approval of physical test")
     try:
-        months = run(args.port, args.baud, args.address, args.expected_id)
+        months, _normal_clock, _history_read_at = run(args.port, args.baud, args.address, args.expected_id)
     except Exception as exc:
         print(f"monthly diagnostic failed: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1

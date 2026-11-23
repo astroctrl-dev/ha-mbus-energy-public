@@ -22,7 +22,7 @@ class AnalysisExportTests(unittest.TestCase):
             path = Path(tmp) / "samples.jsonl"
             sample = make_sample(self.decoded, "00000000", "2026-11-23T02:00:00Z", key)
             self.assertTrue(sample["alias"].startswith("Meter-"))
-            self.assertEqual(sample["meter_local_time"], next(r["value"] for r in self.decoded["records"] if r.get("kind") == "meter_local_time" and r.get("current_record")))
+            self.assertEqual(sample["meter_local_time"], "2024-01-01T12:00")
             self.assertTrue(any(r["kind"] == "energy" for r in sample["records"]))
             append_sample(path, sample, limit=2)
             append_sample(path, sample, limit=2)
@@ -33,6 +33,19 @@ class AnalysisExportTests(unittest.TestCase):
             self.assertNotIn("meter_id", path.read_text())
             self.assertEqual(sample["alias"],
                              make_sample(self.decoded, "00000000", "2026-11-23T02:00:00Z", key)["alias"])
+
+    def test_partial_archive_excludes_invalid_current_record(self):
+        records = [{**r, "value": -1} if r.get("kind") == "energy" and r.get("current_record")
+                   else r for r in self.decoded["records"]]
+        decoded = {**self.decoded, "records": records}
+        selected = select_measurements(decoded, "00000000")
+        with tempfile.TemporaryDirectory() as tmp:
+            sample = make_sample(decoded, "00000000", "2026-11-23T02:00:00Z",
+                                 Path(tmp) / "alias.key", validated=selected)
+        current_energy = [r for r in sample["records"] if r["kind"] == "energy"
+                          and r["storage"] == 0 and r["tariff"] == 0 and r["function"] == 0]
+        self.assertEqual(current_energy, [])
+        self.assertTrue(any(r["kind"] == "power" for r in sample["records"]))
 
     def test_workbook_contains_values_and_provenance(self):
         with tempfile.TemporaryDirectory() as tmp:
