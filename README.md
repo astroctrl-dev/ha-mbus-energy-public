@@ -2,6 +2,16 @@
 
 Denne appen leser Landis+Gyr ULTRAHEAT T230 over kablet M-Bus og publiserer målinger via MQTT Discovery. Den viser aktuell energi, volum, effekt, volumstrøm, temperaturer og diagnostikk. Målerens lokale klokke vises separat fra tidspunktet Home Assistant leste telegrammet.
 
+## Viktig oppgradering – v2.4.0
+
+**Vi anbefaler at alle brukere av tidligere versjoner oppgraderer til v2.4.0.**
+
+I tidligere versjoner var tidsstyringen av ordinære avlesninger, historikkinnhenting og klokkesynkronisering ikke fullt ut samordnet. Under enkelte forhold kunne forespørsler derfor komme for tett i forhold til målerens nødvendige kommunikasjonsintervall, med risiko for avbrutte eller manglende avlesninger.
+
+Fra v2.4.0 benytter alle appens M-Bus-sendinger en felles tidsstyring med minst 61 sekunders ventetid etter hvert sendeforsøk, også ved mislykket sending. Ordinær polling hopper over avlesningstidspunkter som ikke kan gjennomføres innenfor tidskravene. Dette gir mer forutsigbar kommunikasjon og bedre stabilitet.
+
+Ta sikkerhetskopi av appens data og konfigurasjon før oppgradering. Kontroller ordinær avlesning etter oppdatering.
+
 ## Installer
 
 Legg til dette repositoryet under **Settings → Apps → Install app → ⋮ → Repositories → Add**:
