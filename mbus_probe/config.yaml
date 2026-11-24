@@ -1,5 +1,5 @@
 name: "M-Bus T230 energimåling"
-version: "2.3.1"
+version: "2.3.2"
 slug: "mbus_probe"
 description: "Les T230 via M-Bus, vis målinger med MQTT Discovery og hent historikk ved behov."
 arch:
@@ -19,6 +19,8 @@ options:
   baud: 2400
   interval_seconds: 120
   read_before_full_hour: false
+  recovery_raw_log: false
+  allow_recovery_interface_reset: false
   allow_monthly_history: false
   allow_clock_sync: false
   auto_clock_sync: false
@@ -33,6 +35,8 @@ schema:
   baud: int
   interval_seconds: list(90|120|300|600)
   read_before_full_hour: bool
+  recovery_raw_log: bool
+  allow_recovery_interface_reset: bool
   allow_monthly_history: bool
   allow_clock_sync: bool
   auto_clock_sync: bool

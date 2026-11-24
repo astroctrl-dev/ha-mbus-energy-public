@@ -99,6 +99,34 @@ class HistoryControllerTests(unittest.TestCase):
         self.assertFalse(controller.blocked.is_set())
         self.assertEqual(controller.snapshot()["status"], "recovered")
 
+    def test_confirmed_history_requires_explicit_restore_permission(self):
+        controller = self.controller(lambda *_: self.fail("history reader called"))
+        controller.root.mkdir(parents=True)
+        controller.marker.touch()
+        controller.blocked.set()
+        from ha_measurements import REQUIRED_SENSORS
+        from unittest.mock import Mock
+        historical = {"address": 0, "control": 8}
+        reader = Mock(return_value=(b"tx", b"rx"))
+        with patch.object(self.stop, "wait", return_value=False), \
+                patch("history_controller.validate", return_value=historical), \
+                patch("history_controller.extract_months", return_value=months()), \
+                patch("history_controller.select_measurements", side_effect=ValueError("not normal")), \
+                patch.object(controller, "_restore_interface") as restore:
+            self.assertFalse(controller.recover_normal(reader))
+            restore.assert_not_called()
+            self.assertTrue(controller.marker.exists())
+        self.config["allow_recovery_interface_reset"] = True
+        with patch.object(self.stop, "wait", return_value=False), \
+                patch("history_controller.validate", return_value=historical), \
+                patch("history_controller.extract_months", return_value=months()), \
+                patch("history_controller.select_measurements",
+                      side_effect=[ValueError("not normal"), {k: 1 for k in REQUIRED_SENSORS}]), \
+                patch.object(controller, "_restore_interface") as restore:
+            self.assertTrue(controller.recover_normal(reader))
+            restore.assert_called_once_with("/dev/ttyUSB0", 2400, 0)
+        self.assertFalse(controller.marker.exists())
+
     def test_uncertain_restore_stops_normal_polling(self):
         def uncertain(*_):
             raise RestorationError("normal frame not verified")
