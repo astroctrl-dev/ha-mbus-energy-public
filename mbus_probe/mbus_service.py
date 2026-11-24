@@ -10,7 +10,7 @@ from analysis_export import append_sample, make_sample
 from pathlib import Path
 from contextlib import nullcontext
 
-from poll_schedule import next_poll_wait
+from poll_schedule import next_aligned_poll_wait
 
 from ha_measurements import SENSORS, select_measurements
 from mbus_probe import read_one, validate
@@ -174,7 +174,7 @@ def run(config, client, registry=None, bus_lock=None, history_controller=None,
         # chance to publish a fresh normal measurement in this round.
         if valid_meter_ids and on_valid_round:
             on_valid_round(valid_meter_ids)
-        STOP.wait(next_poll_wait(config.get("interval_seconds", 120),
+        STOP.wait(next_aligned_poll_wait(config.get("interval_seconds", 120),
                                  config.get("read_before_full_hour", False),
                                  config.get("seconds_before_full_hour", 5)))
 
