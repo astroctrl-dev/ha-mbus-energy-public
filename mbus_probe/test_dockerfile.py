@@ -10,7 +10,7 @@ class DockerfileTests(unittest.TestCase):
         copy_line = next(line for line in dockerfile.splitlines()
                          if line.startswith("COPY ") and " /opt/" in line)
         copied = set(copy_line.split()[1:-1])
-        for name in ("mbus_probe.py", "mbus_records.py", "ha_measurements.py",
+        for name in ("maintenance_schedule.py", "bus_timing.py", "mbus_probe.py", "mbus_records.py", "ha_measurements.py",
                      "mqtt_bridge.py", "mbus_service.py", "poll_schedule.py",
                      "meter_registry.py", "meter_discovery.py", "meter_ui.py",
                      "monthly_diagnostic.py"):

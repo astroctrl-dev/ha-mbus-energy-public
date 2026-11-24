@@ -192,3 +192,24 @@ class ClockMaintenanceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MinuteBoundaryTests(unittest.TestCase):
+    @patch("clock_maintenance._read_clock")
+    def test_write_waits_for_minute(self, read_clock):
+        from datetime import timedelta, timezone
+        current = [datetime(2026, 11, 23, 3, 0, 20, tzinfo=timezone.utc)]
+        waits = []
+        def sleep(seconds):
+            waits.append(seconds)
+            current[0] += timedelta(seconds=seconds)
+        read_clock.side_effect = [
+            {"meter_local_time": "2026-11-23T03:00", "meter_summer_time": False},
+            {"meter_local_time": "2026-11-23T04:03", "meter_summer_time": False}]
+        ser = FakeSerial()
+        result = sync_once("/dev/ttyUSB0", 2400, 7, "12345678", "Europe/Oslo",
+                           serial_factory=lambda *a, **k: ser, sleep=sleep,
+                           now=lambda: current[0])
+        self.assertEqual(waits, [61, 39, 61])
+        self.assertEqual(result["target"], "2026-11-23T04:02+01:00")
+        self.assertEqual(ser.sent[0][9], 2)

@@ -2,6 +2,7 @@
 
 No clock command runs from ordinary polling or history export.
 """
+from bus_timing import write_frame, shared_timing_active
 import logging
 import threading
 import time
@@ -68,22 +69,37 @@ def sync_once(port, baud, address, meter_id, zone_name, *, reader=read_one,
                 "after": before["meter_local_time"], "changed": False,
                 "manual_required": True,
                 "verified_at_utc": now().astimezone(timezone.utc).isoformat(timespec="seconds")}
-    sleep(61)  # Battery-powered meter; no back-to-back requests.
-    target = now().astimezone(zone)
-    command = set_clock_frame(address, target)
+    if not shared_timing_active():
+        sleep(61)  # Standalone diagnostic fallback.
+    target = None
     if serial_factory is None:
         import serial
         serial_factory = serial.Serial
-    if on_write:
-        on_write(before["meter_local_time"], target.isoformat(timespec="minutes"))
     with serial_factory(port, baudrate=baud, bytesize=8, parity="E", stopbits=1,
                         timeout=5, write_timeout=5, exclusive=True) as ser:
         ser.reset_input_buffer()
-        ser.write(command)
+        def build_at_boundary():
+            nonlocal target
+            # The shared gate has already enforced the minimum spacing.
+            # Align using UTC timestamps (also correct across DST folds).
+            current = now()
+            remainder = current.timestamp() % 60
+            if remainder > 1:
+                sleep(60 - remainder)
+            target = now().astimezone(zone)
+            if target.timestamp() % 60 > 1:
+                raise ValueError("clock write missed minute boundary; retry manually")
+            if on_write:
+                on_write(before["meter_local_time"], target.isoformat(timespec="minutes"))
+            if now().timestamp() - target.timestamp() > 0.5 or now().timestamp() % 60 > 1:
+                raise ValueError("clock write preparation missed precision target")
+            return set_clock_frame(address, target)
+        write_frame(ser, build_at_boundary)
         ser.flush()
         if ser.read(1) != b"\xe5":
             raise ValueError("clock command not acknowledged")
-    sleep(61)
+    if not shared_timing_active():
+        sleep(61)
     after = _read_clock(port, baud, address, meter_id, reader)
     actual = datetime.fromisoformat(after["meter_local_time"]).replace(tzinfo=zone)
     expected = now().astimezone(zone)
@@ -205,9 +221,11 @@ class ClockController:
         try:
             with self.bus_lock:
                 with self.registry.lock:
-                    if self.registry.selected.get(meter_id) != address or self.stop.is_set():
+                    if (self.registry.selected.get(meter_id) != address or self.stop.is_set()
+                            or (self.history_blocked and self.history_blocked.is_set())):
                         raise ValueError("selected meter changed or app is stopping")
-                self.pause(61)  # Previous normal poll/scan may have just finished.
+                if not shared_timing_active():
+                    self.pause(61)
                 try:
                     result = self.operation(
                         self.config["serial_port"], int(self.config.get("baud", 2400)),
@@ -215,7 +233,8 @@ class ClockController:
                         on_write=on_write, auto=auto,
                         allow_auto_write=self._trusted(meter_id))
                 finally:
-                    self.pause(61)  # Preserve spacing even after a failed read or write.
+                    if not shared_timing_active():
+                        self.pause(61)
             if result["changed"]:
                 self._save(meter_id, "verified")
             LOG.info("Clock check completed; changed=%s manual_required=%s before=%s target=%s after=%s",

@@ -1,4 +1,5 @@
 """Explicit, gated frame-3 collection. Never called by polling or download."""
+from bus_timing import write_frame, shared_timing_active
 import json
 import logging
 import os
@@ -68,7 +69,7 @@ class HistoryController:
         with serial.Serial(port, baudrate=baud, bytesize=8, parity="E", stopbits=1,
                            timeout=5, write_timeout=5, exclusive=True) as ser:
             ser.reset_input_buffer()
-            ser.write(tx)
+            write_frame(ser, tx)
             ser.flush()
             rx = read_response(ser)
             self._recovery_log(tx, rx)
@@ -101,7 +102,7 @@ class HistoryController:
                 if not selected:
                     return False
                 for meter_id, address in selected:
-                    if self.stop.wait(61):
+                    if not shared_timing_active() and self.stop.wait(61):
                         return False
                     port = self.config["serial_port"]
                     baud = int(self.config.get("baud", 2400))
@@ -122,15 +123,15 @@ class HistoryController:
                             raise ValueError("historical frame confirmed; interface restore disabled")
                         if len(selected) != 1:
                             raise ValueError("interface restore requires exactly one selected meter")
-                        if self.stop.wait(61):
+                        if not shared_timing_active() and self.stop.wait(61):
                             return False
                         self._restore_interface(port, baud, address)
-                        if self.stop.wait(61):
+                        if not shared_timing_active() and self.stop.wait(61):
                             return False
                         tx, frame = reader(port, baud, address, timeout=5)
                         self._recovery_log(tx, frame)
                         self._verify_recovery(validate(frame), address, meter_id)
-                if self.stop.wait(61):
+                if not shared_timing_active() and self.stop.wait(61):
                     return False
                 self.marker.unlink(missing_ok=True)
                 self.blocked.clear()
@@ -163,18 +164,26 @@ class HistoryController:
         try:
             with self.bus_lock:
                 with self.registry.lock:
-                    if self.registry.selected.get(meter_id) != address or self.stop.is_set():
+                    if (self.registry.selected.get(meter_id) != address or self.stop.is_set()
+                            or self.blocked.is_set()):
                         raise ValueError("selected meter changed or app is stopping")
                 # A normal poll or scan may have finished immediately before the lock.
-                self.pause(61)
+                if not shared_timing_active():
+                    self.pause(61)
                 # Marker survives process crash. Clear only after verified restore.
                 self.root.mkdir(parents=True, exist_ok=True)
                 fd = os.open(self.marker, os.O_WRONLY | os.O_CREAT, 0o600)
                 os.close(fd)
-                result = self.reader(self.config["serial_port"], int(self.config.get("baud", 2400)),
-                                     address, meter_id)
-                # The reader returns only after a checksum/identity-verified normal frame.
-                self.marker.unlink()
+                try:
+                    result = self.reader(self.config["serial_port"], int(self.config.get("baud", 2400)),
+                                         address, meter_id)
+                    # The reader returns only after a verified normal frame.
+                    self.marker.unlink()
+                except Exception:
+                    # Set the guard before releasing the bus lock. A queued
+                    # poll must never slip into an uncertain interface state.
+                    self.blocked.set()
+                    raise
                 if isinstance(result, tuple):
                     months, observation, history_read_at = result
                 else:

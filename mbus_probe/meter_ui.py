@@ -233,14 +233,8 @@ def serve(registry, config, client, bus_lock, stop, port=8099, history_controlle
                     clock_controller.start(meter_id)
                 elif route == "select":
                     registry.select(meter_id)
-                    clock_controller.defer_auto(meter_id)
                 elif route == "auto":
-                    previous = {row["meter_id"] for row in registry.snapshot()["selected"]}
                     registry.select_auto()
-                    if config.get("auto_clock_sync"):
-                        for row in registry.snapshot()["selected"]:
-                            if row["meter_id"] not in previous:
-                                clock_controller.defer_auto(row["meter_id"])
                 else:
                     from mqtt_bridge import cleanup_discovery
                     with bus_lock, registry.lock:

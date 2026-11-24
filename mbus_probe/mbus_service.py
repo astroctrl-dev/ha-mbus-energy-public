@@ -10,7 +10,9 @@ from analysis_export import append_sample, make_sample
 from pathlib import Path
 from contextlib import nullcontext
 
-from poll_schedule import next_poll_wait
+from poll_schedule import next_aligned_poll_wait
+from bus_timing import BusTiming, install_bus_timing, MissedSlot, poll_slot
+from maintenance_schedule import MaintenanceSchedule
 
 from ha_measurements import SENSORS, select_measurements
 from mbus_probe import read_one, validate
@@ -82,6 +84,10 @@ def load_config(path="/data/options.json"):
         raise ValueError("invalid clock_timezone")
     if not isinstance(config.get("allow_monthly_history", False), bool):
         raise ValueError("allow_monthly_history must be boolean")
+    if not isinstance(config.get("auto_monthly_history", False), bool):
+        raise ValueError("auto_monthly_history must be boolean")
+    if config.get("auto_monthly_history") and not config.get("allow_monthly_history"):
+        raise ValueError("auto_monthly_history requires allow_monthly_history")
     if not isinstance(config.get("read_before_full_hour", False), bool):
         raise ValueError("read_before_full_hour must be boolean")
     delay = config.get("seconds_before_full_hour", 5)
@@ -125,8 +131,19 @@ def poll_once(config, client):
 
 
 def run(config, client, registry=None, bus_lock=None, history_controller=None,
-        request_pacer=None, on_valid_round=None):
+        request_pacer=None, on_valid_round=None, timing=None):
     """Fail closed on any bad poll. MQTT Last Will also handles abrupt termination."""
+    def wait_slot():
+        now = time.time()
+        delay = next_aligned_poll_wait(config.get("interval_seconds", 120),
+                                       config.get("read_before_full_hour", False),
+                                       config.get("seconds_before_full_hour", 5), now=now)
+        target = now + delay
+        STOP.wait(delay)
+        return target
+
+    target = wait_slot() if timing else None
+    last_served = None
     while not STOP.is_set():
         if history_controller and history_controller.blocked.is_set():
             client.publish(BRIDGE_AVAILABILITY, "offline", qos=1, retain=True)
@@ -134,6 +151,8 @@ def run(config, client, registry=None, bus_lock=None, history_controller=None,
                 client.publish(BRIDGE_AVAILABILITY, "online", qos=1, retain=True)
             else:
                 STOP.wait(120)
+            if timing:
+                target = wait_slot()
             continue
         if registry:
             for meter_id in list(registry.pending_cleanup):
@@ -147,6 +166,13 @@ def run(config, client, registry=None, bus_lock=None, history_controller=None,
                     LOG.warning("Pending MQTT cleanup failed: %s", exc)
         selections = (registry.snapshot()["selected"] if registry else
                       [{"meter_id": config["meter_id"], "address": config.get("address", 0)}])
+        if timing and selections and last_served is not None:
+            # With a conservative bus-wide gate, rotate meters instead of
+            # starving every meter after the first one in the registry.
+            ids = [row["meter_id"] for row in selections]
+            if last_served in ids:
+                index = ids.index(last_served) + 1
+                selections = selections[index:] + selections[:index]
         valid_meter_ids = []
         for row in selections:
             meter_config = dict(config, meter_id=row["meter_id"], address=row["address"])
@@ -158,12 +184,20 @@ def run(config, client, registry=None, bus_lock=None, history_controller=None,
                         with registry.lock:
                             if registry.selected.get(row["meter_id"]) != row["address"]:
                                 continue
+                    if timing and (not timing.ready() or not 0 <= time.time() - target <= 1):
+                        LOG.info("Scheduled polling slot skipped: bus busy or slot elapsed")
+                        continue
                     if request_pacer and not request_pacer.before_request(STOP):
                         continue
-                    values = poll_once(meter_config, client)
+                    with poll_slot(target) if timing else nullcontext():
+                        if timing:
+                            last_served = row["meter_id"]
+                        values = poll_once(meter_config, client)
                 LOG.info("Valid T230 frame: %d current measurements, %d unavailable",
                          len(values), len(SENSORS) - len(values))
                 valid_meter_ids.append(row["meter_id"])
+            except MissedSlot:
+                LOG.info("Scheduled polling slot skipped at serial transmission")
             except (OSError, ValueError, ConnectionError, RuntimeError) as exc:
                 LOG.warning("T230 unavailable at primary address %d: %s", row["address"], exc)
                 try:
@@ -174,9 +208,7 @@ def run(config, client, registry=None, bus_lock=None, history_controller=None,
         # chance to publish a fresh normal measurement in this round.
         if valid_meter_ids and on_valid_round:
             on_valid_round(valid_meter_ids)
-        STOP.wait(next_poll_wait(config.get("interval_seconds", 120),
-                                 config.get("read_before_full_hour", False),
-                                 config.get("seconds_before_full_hour", 5)))
+        target = wait_slot()
 
 
 def on_broker_connect(client, registry):
@@ -207,6 +239,8 @@ def publish_saved_history(client, registry):
 def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     config = load_config()
+    timing = BusTiming()
+    install_bus_timing(timing)
     registry = MeterRegistry()
     registry.migrate_legacy(config.get("meter_id"), int(config.get("address", 0)))
     bus_lock = threading.Lock()
@@ -239,12 +273,12 @@ def main():
                    keepalive=60)
     client.loop_start()
     server = serve(registry, config, client, bus_lock, STOP)
-    if config.get("auto_clock_sync"):
-        for row in registry.snapshot()["selected"]:
-            server.clock_controller.defer_auto(row["meter_id"])
+    maintenance = MaintenanceSchedule(config, server.clock_controller, server.history_controller, STOP)
+    def valid_round(meter_ids):
+        maintenance.on_valid_round(meter_ids)
     try:
-        run(config, client, registry, bus_lock, server.history_controller, RequestPacer(),
-            server.clock_controller.on_valid_round)
+        run(config, client, registry, bus_lock, server.history_controller, None,
+            valid_round, timing=timing)
     finally:
         try:
             server.shutdown()
