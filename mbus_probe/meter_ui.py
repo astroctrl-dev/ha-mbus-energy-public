@@ -243,7 +243,7 @@ def serve(registry, config, client, bus_lock, stop, port=8099, history_controlle
                                 clock_controller.defer_auto(row["meter_id"])
                 else:
                     from mqtt_bridge import cleanup_discovery
-                    with bus_lock, registry.lock:
+                    with history_controller.publication_lock, bus_lock, registry.lock:
                         if meter_id not in registry.selected:
                             raise ValueError("meter not selected")
                         from mqtt_bridge import mark_unavailable

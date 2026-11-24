@@ -9,6 +9,8 @@ from mqtt_bridge import (availability_topic, cleanup_discovery, device_key, disc
 
 class FakeResult:
     rc = 0
+    def is_published(self):
+        return True
     def wait_for_publish(self, timeout=None):
         return None
 
@@ -135,6 +137,16 @@ class MqttTests(unittest.TestCase):
         self.assertEqual(client.messages, [])
         mark_unavailable(client, "00000000")
         self.assertEqual(client.messages[-1][-3:], ("offline", 1, True))
+
+    def test_history_missing_puback_raises(self):
+        from history_model import build_snapshot
+        from unittest.mock import patch
+        months = [{"month_back": n, "value": 1000 - 10*n, "unit": "kWh"}
+                  for n in range(1, 25)]
+        snapshot = build_snapshot(months, "2026-11-23T03:00:00Z")
+        with patch.object(FakeResult, "is_published", return_value=False):
+            with self.assertRaises(ConnectionError):
+                publish_history(FakeClient(), "12345678", snapshot)
 
     def test_historical_values_are_diagnostic_positions_not_energy_counters(self):
         from history_model import build_snapshot

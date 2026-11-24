@@ -133,7 +133,12 @@ def run(config, client, registry=None, bus_lock=None, history_controller=None,
 
     def publish_history_async(meter_id):
         try:
-            publish_history_discovery(client, meter_id)
+            with history_controller.publication_lock if history_controller else nullcontext():
+                if registry:
+                    with registry.lock:
+                        if meter_id not in registry.selected:
+                            return
+                publish_history_discovery(client, meter_id)
             with history_discovery_lock:
                 history_discovery_confirmed.add(meter_id)
         except (OSError, ValueError, ConnectionError, RuntimeError) as exc:
@@ -149,7 +154,7 @@ def run(config, client, registry=None, bus_lock=None, history_controller=None,
         if registry:
             for meter_id in list(registry.pending_cleanup):
                 try:
-                    with bus_lock, registry.lock:
+                    with (history_controller.publication_lock if history_controller else nullcontext()), bus_lock, registry.lock:
                         if meter_id not in registry.pending_cleanup or meter_id in registry.selected:
                             continue
                         cleanup_discovery(client, meter_id)
@@ -248,6 +253,7 @@ def main():
     import paho.mqtt.client as mqtt
     client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
                          client_id="mbus_t230_bridge")
+    server = serve(registry, config, client, bus_lock, STOP)
     history_publish_lock = threading.Lock()
     def on_connect(mqtt_client, _userdata, _flags, reason_code, _properties):
         if not reason_code.is_failure:
@@ -255,7 +261,16 @@ def main():
             if history_publish_lock.acquire(blocking=False):
                 def republish():
                     try:
-                        publish_saved_history(mqtt_client, registry)
+                        for row in registry.snapshot()['selected']:
+                            try:
+                                with server.history_controller.publication_lock:
+                                    with registry.lock:
+                                        if row['meter_id'] not in registry.selected:
+                                            continue
+                                    publish_history_discovery(mqtt_client, row['meter_id'])
+                            except (OSError, ValueError, ConnectionError, RuntimeError):
+                                LOG.warning('History discovery reconnect failed')
+                        server.history_controller.queue_saved_publication()
                     finally:
                         history_publish_lock.release()
                 threading.Thread(target=republish, daemon=True).start()
@@ -269,13 +284,18 @@ def main():
     client.connect(config["mqtt_host"], int(config.get("mqtt_port", 1883)),
                    keepalive=60)
     client.loop_start()
-    server = serve(registry, config, client, bus_lock, STOP)
     if config.get("auto_clock_sync"):
         for row in registry.snapshot()["selected"]:
             server.clock_controller.defer_auto(row["meter_id"])
+    from history_controller import HistorySchedule
+    history_schedule = HistorySchedule(server.history_controller)
+    def on_valid_round(meter_ids):
+        server.history_controller.retry_publication()
+        server.clock_controller.on_valid_round(meter_ids)
+        history_schedule.on_valid_round(meter_ids)
     try:
         run(config, client, registry, bus_lock, server.history_controller, RequestPacer(),
-            server.clock_controller.on_valid_round)
+            on_valid_round)
     finally:
         try:
             server.shutdown()
