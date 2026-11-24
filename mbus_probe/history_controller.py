@@ -10,7 +10,8 @@ from pathlib import Path
 from analysis_export import _alias
 from history_model import build_snapshot, detect_month_shift, estimated_month_at_capture, save_snapshot
 from mqtt_bridge import device_key
-from monthly_diagnostic import RestorationError, run as read_months
+from monthly_diagnostic import (RestorationError, run as read_months, extract_months,
+                                restore_normal_frame, read_response)
 from mbus_probe import read_one, validate
 from ha_measurements import REQUIRED_SENSORS, select_measurements
 
@@ -56,8 +57,34 @@ class HistoryController:
         with self.lock:
             return dict(self.state)
 
+    def _recovery_log(self, tx, rx):
+        LOG.info("Recovery TX=%s RX length=%d bytes", tx.hex(" "), len(rx))
+        if self.config.get("recovery_raw_log") is True:
+            LOG.info("Recovery raw RX=%s", rx.hex(" "))
+
+    def _restore_interface(self, port, baud, address):
+        import serial
+        tx = restore_normal_frame(address)
+        with serial.Serial(port, baudrate=baud, bytesize=8, parity="E", stopbits=1,
+                           timeout=5, write_timeout=5, exclusive=True) as ser:
+            ser.reset_input_buffer()
+            ser.write(tx)
+            ser.flush()
+            rx = read_response(ser)
+            self._recovery_log(tx, rx)
+        if rx != b"\xe5":
+            raise ValueError("normal interface restore not acknowledged")
+
+    def _verify_recovery(self, decoded, address, meter_id):
+        if decoded.get("address") != address:
+            raise ValueError("normal frame address mismatch")
+        values = select_measurements(decoded, meter_id)
+        missing = REQUIRED_SENSORS - values.keys()
+        if missing:
+            raise ValueError("normal frame missing required measurements: " + ", ".join(sorted(missing)))
+
     def recover_normal(self, reader=read_one):
-        """Read-only recovery. Never clear persistent guard on ACK or partial data."""
+        """Read first; optional interface restore only after confirmed frame-3 identity."""
         if not self.blocked.is_set():
             return True
         try:
@@ -68,14 +95,33 @@ class HistoryController:
                 for meter_id, address in selected:
                     if self.stop.wait(61):
                         return False
-                    _, frame = reader(self.config["serial_port"],
-                                      int(self.config.get("baud", 2400)), address, timeout=5)
+                    port = self.config["serial_port"]
+                    baud = int(self.config.get("baud", 2400))
+                    tx, frame = reader(port, baud, address, timeout=5)
+                    self._recovery_log(tx, frame)
                     decoded = validate(frame)
-                    if decoded.get("address") != address:
-                        raise ValueError("normal frame address mismatch")
-                    values = select_measurements(decoded, meter_id)
-                    if not REQUIRED_SENSORS.issubset(values):
-                        raise ValueError("normal frame missing required measurements")
+                    try:
+                        self._verify_recovery(decoded, address, meter_id)
+                    except ValueError as normal_error:
+                        if decoded.get("address") != address or decoded.get("control") not in (8, 24):
+                            raise normal_error
+                        try:
+                            extract_months(frame, meter_id)
+                        except ValueError:
+                            raise normal_error from None
+                        LOG.warning("Recovery confirmed historical frame for selected meter")
+                        if self.config.get("allow_recovery_interface_reset") is not True:
+                            raise ValueError("historical frame confirmed; interface restore disabled")
+                        if len(selected) != 1:
+                            raise ValueError("interface restore requires exactly one selected meter")
+                        if self.stop.wait(61):
+                            return False
+                        self._restore_interface(port, baud, address)
+                        if self.stop.wait(61):
+                            return False
+                        tx, frame = reader(port, baud, address, timeout=5)
+                        self._recovery_log(tx, frame)
+                        self._verify_recovery(validate(frame), address, meter_id)
                 if self.stop.wait(61):
                     return False
                 self.marker.unlink(missing_ok=True)
@@ -85,7 +131,8 @@ class HistoryController:
                 LOG.info("Normal frame verified; polling resumed")
                 return True
         except Exception as exc:
-            LOG.warning("Read-only normal frame recovery failed: %s", type(exc).__name__)
+            LOG.warning("Normal frame recovery failed: %s: %s", type(exc).__name__,
+                        str(exc) if isinstance(exc, ValueError) else "see local serial/storage configuration")
             return False
 
     def start(self, meter_id):
