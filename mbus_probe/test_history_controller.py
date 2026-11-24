@@ -1,4 +1,5 @@
 import threading
+from unittest.mock import patch
 import tempfile
 import unittest
 from io import BytesIO
@@ -75,6 +76,28 @@ class HistoryControllerTests(unittest.TestCase):
         self.assertEqual(bad.snapshot()["status"], "failed")
         self.assertFalse(self.stop.is_set())
         self.assertEqual(load_history(self.root / "analysis", self.registry.snapshot()["selected"]), original)
+
+    def test_recovery_requires_verified_normal_frame(self):
+        controller = self.controller(lambda *_: self.fail("history reader called"))
+        controller.root.mkdir(parents=True)
+        controller.marker.touch()
+        controller.blocked.set()
+        self.config["allow_monthly_history"] = False
+        with patch.object(self.stop, "wait", return_value=False), \
+                patch("history_controller.validate", return_value={"address": 0}), \
+                patch("history_controller.select_measurements", return_value={"energy": 1}):
+            self.assertFalse(controller.recover_normal(lambda *a, **k: (b"", b"")))
+        self.assertTrue(controller.marker.exists())
+        self.assertTrue(controller.blocked.is_set())
+        from ha_measurements import REQUIRED_SENSORS
+        with patch.object(self.stop, "wait", return_value=False), \
+                patch("history_controller.validate", return_value={"address": 0}), \
+                patch("history_controller.select_measurements",
+                      return_value={k: 1 for k in REQUIRED_SENSORS}):
+            self.assertTrue(controller.recover_normal(lambda *a, **k: (b"", b"")))
+        self.assertFalse(controller.marker.exists())
+        self.assertFalse(controller.blocked.is_set())
+        self.assertEqual(controller.snapshot()["status"], "recovered")
 
     def test_uncertain_restore_stops_normal_polling(self):
         def uncertain(*_):

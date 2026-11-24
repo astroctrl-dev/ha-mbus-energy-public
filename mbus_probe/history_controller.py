@@ -11,6 +11,8 @@ from analysis_export import _alias
 from history_model import build_snapshot, detect_month_shift, estimated_month_at_capture, save_snapshot
 from mqtt_bridge import device_key
 from monthly_diagnostic import RestorationError, run as read_months
+from mbus_probe import read_one, validate
+from ha_measurements import REQUIRED_SENSORS, select_measurements
 
 LOG = logging.getLogger("mbus.history")
 
@@ -53,6 +55,38 @@ class HistoryController:
     def snapshot(self):
         with self.lock:
             return dict(self.state)
+
+    def recover_normal(self, reader=read_one):
+        """Read-only recovery. Never clear persistent guard on ACK or partial data."""
+        if not self.blocked.is_set():
+            return True
+        try:
+            with self.bus_lock, self.registry.lock:
+                selected = list(self.registry.selected.items())
+                if not selected:
+                    return False
+                for meter_id, address in selected:
+                    if self.stop.wait(61):
+                        return False
+                    _, frame = reader(self.config["serial_port"],
+                                      int(self.config.get("baud", 2400)), address, timeout=5)
+                    decoded = validate(frame)
+                    if decoded.get("address") != address:
+                        raise ValueError("normal frame address mismatch")
+                    values = select_measurements(decoded, meter_id)
+                    if not REQUIRED_SENSORS.issubset(values):
+                        raise ValueError("normal frame missing required measurements")
+                if self.stop.wait(61):
+                    return False
+                self.marker.unlink(missing_ok=True)
+                self.blocked.clear()
+                with self.lock:
+                    self.state = {"status": "recovered", "error": None, "captured_at_utc": None}
+                LOG.info("Normal frame verified; polling resumed")
+                return True
+        except Exception as exc:
+            LOG.warning("Read-only normal frame recovery failed: %s", type(exc).__name__)
+            return False
 
     def start(self, meter_id):
         if self.config.get("allow_monthly_history") is not True:
