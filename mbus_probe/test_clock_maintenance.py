@@ -188,8 +188,13 @@ class ClockMaintenanceTests(unittest.TestCase):
             read_clock.side_effect = None
             read_clock.return_value = {"meter_local_time": "2026-11-23T04:00", "meter_summer_time": False}
             if abs(seconds) > 120:
-                read_clock.side_effect = [read_clock.return_value,
-                    {"meter_local_time": now.isoformat(timespec="minutes").split("+")[0], "meter_summer_time": False}]
+                initial = read_clock.return_value
+                def simulated_read(*args):
+                    if not ser.sent:
+                        return initial
+                    return {"meter_local_time": now.isoformat(timespec="minutes").split("+")[0],
+                            "meter_summer_time": False}
+                read_clock.side_effect = simulated_read
             ser = FakeSerial()
             def advance(n):
                 nonlocal now
