@@ -1,54 +1,52 @@
-# M-Bus T230 energimåling
+# M-Bus T230 energy metering
 
-Les Landis+Gyr T230 over kablet M-Bus, vis målinger i Home Assistant via MQTT Discovery, og last ned validerte normalavlesninger og månedshistorikk som Excel-fil.
+Read Landis+Gyr T230 over wired M-Bus, expose measurements via MQTT Discovery, and export validated regular readings and monthly history to Excel.
 
-## Forberedelse
+## Preparation
 
-- Kontroller målerens dokumenterte M-Bus-terminaler og adapterens bussforsyning før fysisk tilkobling. Ledningsfarge alene identifiserer ikke terminalene.
-- Gjør USB-serieadapteren tilgjengelig i Home Assistant OS, og installer MQTT-broker og MQTT-integrasjonen.
-- Ta backup av appens data og innstillinger før oppdatering. Appdata omfatter målervalg, lagrede normalavlesninger og historikksnapshot.
+- Verify documented meter terminals and adapter bus supply before wiring. Wire colours alone do not identify terminals.
+- Make the USB serial adapter available to Home Assistant OS and install the MQTT broker and integration.
+- Back up app data and settings before updating, including meter selection, stored readings and historical snapshots.
 
-## Konfigurasjon
+## Configuration
 
-1. Velg faktisk `serial_port` i **Settings → Apps → M-Bus T230 energimåling → Configuration**, og bruk baudraten som er dokumentert for måleren.
-2. `mqtt_host` er `core-mosquitto` som standard når broker kjører på samme HA-instans. Sett MQTT-bruker og passord lokalt. Velg minst 90 sekunder mellom ordinære avlesninger; standard er 120 sekunder.
-3. Trykk **Save** og **Start**. Åpne **Open Web UI**, velg **Søk etter målere**, og bruk **Legg til** på et entydig validert funn. Grensesnittet viser målerens ID og primæradresse lokalt.
-4. Kontroller de sju målesensorene og diagnostikk under **Settings → Devices & services → MQTT**. Lagre og start appen på nytt etter endring av innstillinger.
+1. Select the actual serial_port under **Settings → Apps → M-Bus T230 energimåling → Configuration** and use the documented meter baud rate.
+2. Default mqtt_host is core-mosquitto for a local broker. Enter MQTT credentials locally. Select a polling interval of at least 90 seconds; default 120.
+3. Save and start, open the web UI and discover meters (**Søk etter målere**). Add (**Legg til**) a verified result. Meter ID and primary address appear locally. The current UI may use Norwegian labels.
+4. Verify the seven measurement sensors and diagnostics under **Settings → Devices & services → MQTT**. Save and restart after configuration changes.
 
-## Klokke og data
+## Clock and data
 
-Målerens lokale dato og klokkeslett vises som tekst fra normalrammen. Det er et klokkeslett fra måleren uten kodet UTC-offset; Home Assistants tidspunkt for siste vellykkede avlesning vises separat i UTC. Sommertidflagget rapporteres separat. Historiske energiposter er 24 akkumulerte kWh-stander og 23 differanser mellom nabo-stander. Faktiske avregningsdatoer vises bare når de er verifisert fra måleren. Beregnede datoer merkes tydelig; posisjon i arkivet er ikke en målt avregningsdato.
+Meter local date/time is shown as text without an encoded UTC offset. HA last successful reading is separate and in UTC; the daylight-saving flag is separate. History contains 24 cumulative kWh readings and 23 adjacent differences. Estimated dates are clearly marked and are not measured billing dates.
 
-**Last ned analyse (.xlsx)** lager en fil av allerede lagrede, validerte avlesninger. Nedlasting sender ingen ny M-Bus-forespørsel. Filen bruker et alias i stedet for ekte måler-ID og utelater råtelegrammer og tilgangsopplysninger. Den inneholder likevel reelle måleverdier og bør gjennomgås før deling.
+The analysis download (**Last ned analyse (.xlsx)**) exports stored validated readings without issuing a request. It substitutes an alias for the meter ID and excludes raw telegrams and credentials, but contains real measurements that should be reviewed before sharing.
 
-## Månedshistorikk
+## Monthly history
 
-Aktiver `allow_monthly_history` i **Configuration**, trykk **Save** og start appen på nytt. Velg **Hent månedshistorikk** ved den aktuelle måleren. Operasjonen pauser ordinær polling, velger historisk M-Bus-ramme, leser 24 poster og gjenoppretter og verifiserer normalrammen før polling fortsetter. Den kan ta flere minutter. Trykk ikke gjentatte ganger mens status er **running**. Ved **restore_unverified** stanser ordinær polling; undersøk og verifiser normalrammen før nye avlesninger. Historiske verdier registreres ikke som nytt forbruk i dagens HA Energy-periode.
+Enable allow_monthly_history, save and restart, then select **Hent månedshistorikk** for the meter. The operation pauses regular polling, selects the historical frame, reads 24 records and restores and verifies the normal frame before resuming. It may take several minutes. Do not repeatedly press the button while running. With restore_unverified status, polling stays blocked until normal-frame verification. History is not recorded as new current HA Energy consumption.
 
-Når status er **complete**, viser **Open Web UI** en tabell med 24 akkumulerte målerstander og 23 forbruksdifferanser, og Excel-eksporten inneholder arkene **Månedshistorikk** og **Månedsforbruk**. Tabellen kan også vises etter omstart fra lagret snapshot. Uten lagret historikk inneholder eksporten bare normalavlesninger.
+On completion, the web UI shows 24 readings and 23 differences. Excel includes the history worksheets (currently named **Månedshistorikk** and **Månedsforbruk**). A stored snapshot may also be displayed after restart. Without stored history, only regular readings are exported.
 
-## Oppdatering og tilbakeføring
+## Updates and rollback
 
-En repository-app oppdateres i **Settings → Apps**. Ta backup av appdata og innstillinger før oppdatering, og kontroller målervalg, MQTT-entiteter og ferske normalavlesninger etterpå. Ved feil: stopp appen, gjenopprett backupen av appdata og tidligere appversjon, start den på nytt, og kontroller MQTT og normalrammestatus. Kjør aldri to appkopier mot samme M-Bus-adapter og MQTT-identiteter samtidig.
+All earlier versions should be upgraded to v2.4.0. The application now coordinates M-Bus transmissions using a shared timing gate and skips missed polling slots. Back up app data and settings, update through Settings → Apps, and verify meter selection, MQTT entities and fresh readings. On failure, stop, restore the previous app version and corresponding backup, restart and verify MQTT and normal-frame status. Never run two copies against the same adapter and MQTT identities.
 
-## Klokkesynkronisering
+## Clock synchronization
 
-Klokkesynk er avslått som standard. Kontroller først at Home Assistant har korrekt systemtid og velg målerens lokale tidssone i `clock_timezone` (standard `Europe/Oslo`). Aktiver `allow_clock_sync`, trykk **Save** og **Restart**. **Synkroniser målerklokke** i **Open Web UI** krever egen bekreftelse. Appen leser klokken, skriver systemtid omregnet til valgt tidssone, og leser tilbake for å verifisere. Måleren rapporterer minutter, ikke sekunder. Hvis kontrollen feiler, vises usikker status; kontroller klokken før du prøver igjen.
+Off by default. Verify HA system time and the meter time zone (clock_timezone, default Europe/Oslo). Enable allow_clock_sync, save and restart. Manual synchronization (**Synkroniser målerklokke**) requires confirmation, reads the clock, writes system time in the configured zone and verifies readback. Meter time has minute resolution. If verification fails, check the clock before retrying.
 
-`auto_clock_sync` er et separat, frivillig valg. Etter en verifisert manuell synk kontrolleres klokken én gang etter første gyldige avlesning ved appstart eller nytt målervalg. Automatisk retting skjer bare ved avvik over 120 og høyst 300 sekunder eller avvikende sommertidbit innen denne grensen. Større avvik krever manuell handling. Ordningen retter ikke automatisk et helt times avvik ved overgang til sommertid. Innhenting av ferske målinger skjer før denne klokkesjekken. Bruk ikke flere appkopier mot samme adapter.
+auto_clock_sync is optional and requires verified manual synchronization. Checks run after a valid reading at startup and during the configured nightly hour. Automatic correction is limited to deviations above 120 and up to 300 seconds, or a differing daylight-saving flag within the permitted bound. Larger deviations require manual action, including a full-hour daylight-saving offset. Do not share the adapter with another app.
 
-## Målinger i Home Assistant
+## Home Assistant measurements
 
-Effekt kan være positiv eller negativ. Hver gyldig målepost vurderes for seg; én manglende eller ugyldig verdi gir **unknown** for den sensoren uten å avvise andre gyldige verdier. Volum (m³) og separate akkumulerte timetellere for driftstid, vannstrømstid og tid uten måling vises når de finnes i normalrammen. Timetellerne forteller ikke om pumpa går akkurat nå.
+Power may be signed. Each valid record is evaluated independently; an invalid or missing value makes only that sensor unknown. Volume (m³) and cumulative operating, flow and non-measuring hour counters are exposed when present; these counters do not indicate current pump operation.
 
-Etter en manuell, fullført historikkinnhenting vises 24 diagnostiske sensorer for akkumulerte kWh-stander og 23 for differanser. Historiske poster har ikke `state_class` som nye energitellere og mates ikke inn som dagens energiforbruk. Et nytt oppsett foreslår sorterbare navn og entitets-ID-er med `−01` … `−24`; eksisterende eller egendefinerte entitets-ID-er omdøpes ikke ved oppdatering. ID-en omfatter en pseudonym målernøkkel, som ikke er anonymisering.
+After completed manual history retrieval, 24 cumulative historical kWh sensors and 23 difference sensors are exposed as diagnostics. They are not new energy counters for the current period. New installations suggest sortable names and IDs with positions −01 through −24; existing or customized IDs are not renamed. IDs include a pseudonymous meter key, which is not anonymization.
 
-## Datoer for arkiverte verdier
+## Archive dates
 
-Målerens historikkramme med kWh-stander inneholder ikke verifisert lagringstid for hver post. Appen kan merke dato som **beregnet** fra antatt første dag i måneden: posisjon −01 tilhører innhentingsmåneden, −02 måneden før osv. Dette skjer bare ved ny innhenting etter verifisert manuell klokkesynk, når målerens klokke og valgt Home Assistant-tidssone samsvarer innen 120 sekunder, sommertidbit samsvarer og tidspunktet ikke er innen de første 15 minuttene etter månedsskiftet. Hvis vilkårene ikke er oppfylt, vises ingen beregnet dato. `estimated_date` er et anslag, ikke en målt avregningsdato. En gammel historikk får aldri flyttet datoene når kalenderen skifter.
+The historical frame has no verified storage timestamp for each record. The app can estimate first-of-month dates, with position −01 assigned to the retrieval month and −02 to the preceding month, and so on. This requires fresh retrieval after verified manual clock synchronization, matching meter and configured HA time within 120 seconds, matching daylight-saving flags and retrieval outside the first 15 minutes after month rollover. Otherwise no estimated date appears. estimated_date is an estimate, not a measured billing date. Stored historical dates do not shift when the calendar changes.
 
-Ved en senere manuell innhenting kan appen registrere et bekreftet månedsskifte når alle arkivposisjoner er forskjøvet ett trinn og nyeste historiske målerstand er høyere enn før. Dette er bevis for endret arkiv, ikke et målt klokkeslett. Se `history_captured_at_utc` for innhentingstidspunkt og `meter_date_status` for datogrunnlaget.
+A later manual retrieval can identify a confirmed archive rollover when all positions shift by one and the newest cumulative reading increases. This demonstrates an archive change, not its exact timestamp. See history_captured_at_utc for retrieval time and meter_date_status for date quality.
 
-## Oppdatering
-
-Ta backup av appdata og innstillinger. Ved oppdatering fra 2.0.0: trykk **Update**, kontroller nye klokkevalg (standard avslått), **Save**, og **Start**. Se [installasjonsveiledningen](https://github.com/astroctrl-dev/ha-mbus-energy-public/blob/main/INSTALLASJON.md). Tidligere valg under 90 sekunder kjøres som 120 sekunder; velg et gyldig intervall før lagring.
+See the [installation guide](https://github.com/astroctrl-dev/ha-mbus-energy-public/blob/main/INSTALLASJON.md). Legacy polling intervals below 90 seconds run at 120 seconds; select a supported interval before saving.
