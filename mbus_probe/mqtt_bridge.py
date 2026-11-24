@@ -117,8 +117,6 @@ def publish_history(client, meter_id, snapshot):
         if result.rc:
             raise ConnectionError("MQTT history discovery publish failed")
         result.wait_for_publish(timeout=5)
-        if not result.is_published():
-            raise ConnectionError("MQTT history PUBACK timeout")
     for index in range(1, 25):
         value = by_stand[index]["cumulative_kwh"]
         if type(value) not in (int, float) or value < 0:
@@ -138,15 +136,11 @@ def publish_history(client, meter_id, snapshot):
         if result.rc:
             raise ConnectionError("MQTT history attributes publish failed")
         result.wait_for_publish(timeout=5)
-        if not result.is_published():
-            raise ConnectionError("MQTT history PUBACK timeout")
         result = client.publish(f"mbus/t230/{key}/history_stand_{index}/state",
                                 str(value), qos=1, retain=False)
         if result.rc:
             raise ConnectionError("MQTT history state publish failed")
         result.wait_for_publish(timeout=5)
-        if not result.is_published():
-            raise ConnectionError("MQTT history PUBACK timeout")
     for index in range(1, 24):
         value = by_period[index]["period_kwh"]
         if type(value) not in (int, float) or value < 0:
@@ -171,15 +165,11 @@ def publish_history(client, meter_id, snapshot):
         if result.rc:
             raise ConnectionError("MQTT history attributes publish failed")
         result.wait_for_publish(timeout=5)
-        if not result.is_published():
-            raise ConnectionError("MQTT history PUBACK timeout")
         result = client.publish(f"mbus/t230/{key}/history_period_{index}/state",
                                 str(value), qos=1, retain=False)
         if result.rc:
             raise ConnectionError("MQTT history state publish failed")
         result.wait_for_publish(timeout=5)
-        if not result.is_published():
-            raise ConnectionError("MQTT history PUBACK timeout")
 
 
 def publish_reading(client, decoded, meter_id, read_at_utc=None):

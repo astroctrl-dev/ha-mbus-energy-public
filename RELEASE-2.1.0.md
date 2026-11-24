@@ -1,13 +1,13 @@
-# M-Bus T230 Energy Metering 2.1.0
+# M-Bus T230 energimåling 2.1.0
 
-- Signed power is handled per measurement record. Valid values remain available even when another record in the telegram is invalid.
-- Optional counters for meter operating hours, water flow hours and hours without measurement are displayed separately when supplied by the meter.
-- Manual meter clock synchronization can be enabled in Configuration. A separate automatic clock check runs once after the first valid normal reading at startup or after selecting a new meter. Automatic writes require previously verified manual synchronization and a bounded clock deviation. Both options are disabled by default.
-- Manual history retrieval is designed to expose 24 cumulative historical kWh readings and 23 differences as Home Assistant diagnostics. Historical values are not counted as today's consumption in HA Energy.
-- Historical dates may be labelled **estimated** as the first day of the month when clock provenance is verified. The timestamp is not read from the historical frame. A 15-minute exclusion window applies after the month changes.
-- New installations suggest sortable historical names and entity IDs using positions 01–24. Existing entity IDs are retained.
-- The app prioritizes the first normal reading before the automatic clock check. The default polling interval is 120 seconds.
+- Signert effekt håndteres per målepost. Gyldige verdier forblir tilgjengelige selv om en annen post i telegrammet er ugyldig.
+- Valgfrie timetellere for målerdrift, vannstrøm og tid uten måling vises separat når måleren leverer dem.
+- Manuell synkronisering av målerklokken kan aktiveres i Configuration. En separat automatisk klokkesjekk kjøres én gang etter første gyldige normalavlesning ved appstart eller nytt målervalg. Automatisk skriving krever tidligere verifisert manuell synk og avgrenset tidsavvik. Begge valgene er avslått som standard.
+- Etter manuell innhenting vises 24 historiske akkumulerte kWh-stander og 23 differanser som diagnostikk i Home Assistant. Historiske verdier mates ikke som dagens forbruk i HA Energy.
+- Historiske datoer kan merkes **beregnet** første dag i måneden når klokkegrunnlaget er verifisert. Tidspunktet er ikke lest fra historikkrammen. En karantene på 15 minutter gjelder etter månedsskifte.
+- Ved ny installasjon foreslås sorterbare historiske navn og entitets-ID-er med posisjoner 01–24. Eksisterende entitets-ID-er beholdes.
+- Appen prioriterer første ordinære avlesning før automatisk klokkesjekk. Normal intervallavlesning er 120 sekunder som standard.
 
-Install or update from https://github.com/astroctrl-dev/ha-mbus-energy-public. Back up app data and settings before updating. See [installation guide](INSTALLASJON.md) and [app documentation](mbus_probe/DOCS.md) for configuration, rollback and date provenance.
+Installer eller oppdater fra https://github.com/astroctrl-dev/ha-mbus-energy-public. Ta backup av appdata og innstillinger før Update. Se INSTALLASJON.md og mbus_probe/DOCS.md for konfigurasjon, tilbakeføring og datogrunnlag.
 
-Public offline tests and Docker builds passed for the original release. Verify physical connections, fresh measurements and any clock settings in your own installation.
+Offentlige offline-tester og Docker-bygg er bestått. Kontroller fysisk tilkobling, ferske målinger og eventuelle klokkevalg i egen installasjon.
