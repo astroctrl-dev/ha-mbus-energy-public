@@ -221,7 +221,7 @@ class ServiceTests(unittest.TestCase):
         with patch("mbus_service.STOP", StopAfterOne()), \
              patch("mbus_service.read_one") as reader:
             run({"meter_id": "00000000", "address": 0}, client,
-                history_controller=SimpleNamespace(blocked=blocked))
+                history_controller=SimpleNamespace(blocked=blocked, recover_normal=lambda: False))
         reader.assert_not_called()
         self.assertIn(("mbus/t230/bridge/availability", "offline", 1, True), client.messages)
 
