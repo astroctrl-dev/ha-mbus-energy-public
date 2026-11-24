@@ -50,7 +50,8 @@ def _read_clock(port, baud, address, meter_id, reader):
 
 def sync_once(port, baud, address, meter_id, zone_name, *, reader=read_one,
               sleep=time.sleep, now=lambda: datetime.now(timezone.utc),
-              serial_factory=None, on_write=None, auto=False, allow_auto_write=False):
+              serial_factory=None, on_write=None, auto=False, allow_auto_write=False,
+              cancelled=lambda: False):
     """Read, write once, then read back. An ACK alone never counts as success."""
     if baud not in (300, 2400):
         raise ValueError("unsupported baud rate")
@@ -69,17 +70,36 @@ def sync_once(port, baud, address, meter_id, zone_name, *, reader=read_one,
                 "manual_required": True,
                 "verified_at_utc": now().astimezone(timezone.utc).isoformat(timespec="seconds")}
     sleep(61)  # Battery-powered meter; no back-to-back requests.
-    target = now().astimezone(zone)
-    command = set_clock_frame(address, target)
     if serial_factory is None:
         import serial
         serial_factory = serial.Serial
-    if on_write:
-        on_write(before["meter_local_time"], target.isoformat(timespec="minutes"))
     with serial_factory(port, baudrate=baud, bytesize=8, parity="E", stopbits=1,
                         timeout=5, write_timeout=5, exclusive=True) as ser:
         ser.reset_input_buffer()
-        ser.write(command)
+        # Prepare the port before waiting. Re-evaluate time after each wakeup.
+        for _ in range(5):
+            if cancelled():
+                raise ValueError("clock sync cancelled before write")
+            target = now().astimezone(zone)
+            offset = target.second + target.microsecond / 1e6
+            if offset >= 1:
+                sleep(60 - offset)
+                continue
+            if on_write:
+                on_write(before["meter_local_time"], target.isoformat(timespec="minutes"))
+            actual_send = now().astimezone(zone)
+            if (actual_send.replace(second=0, microsecond=0).timestamp() !=
+                    target.replace(second=0, microsecond=0).timestamp()
+                    or actual_send.second >= 1):
+                continue
+            if cancelled():
+                raise ValueError("clock sync cancelled before write")
+            ser.write(set_clock_frame(address, actual_send))
+            LOG.info("Clock command sent at %s; minute offset %.3f s",
+                     actual_send.isoformat(), actual_send.microsecond / 1e6)
+            break
+        else:
+            raise ValueError("missed clock write window")
         ser.flush()
         if ser.read(1) != b"\xe5":
             raise ValueError("clock command not acknowledged")
@@ -232,7 +252,9 @@ class ClockController:
                         self.config["serial_port"], int(self.config.get("baud", 2400)),
                         address, meter_id, self.config.get("clock_timezone", "Europe/Oslo"),
                         on_write=on_write, auto=auto,
-                        allow_auto_write=self._trusted(meter_id))
+                        allow_auto_write=self._trusted(meter_id),
+                        cancelled=lambda: self.stop.is_set() or bool(
+                            self.history_blocked and self.history_blocked.is_set()))
                 finally:
                     self.pause(61)  # Preserve spacing even after a failed read or write.
             if result["changed"]:
