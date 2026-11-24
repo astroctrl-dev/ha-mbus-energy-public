@@ -42,6 +42,8 @@ class MqttTests(unittest.TestCase):
         self.assertEqual(by_kind["Flow"]["unit_of_measurement"], "m³/h")
         self.assertEqual(by_kind["Energy"]["state_class"], "total_increasing")
         self.assertEqual(by_kind["Flow Temperature"]["unit_of_measurement"], "°C")
+        self.assertEqual(by_kind["Temperature Difference"]["device_class"], "temperature_delta")
+        self.assertEqual(by_kind["Temperature Difference"]["unit_of_measurement"], "K")
         self.assertEqual(by_kind["Flow Time"]["unit_of_measurement"], "h")
         self.assertNotIn("device_class", by_kind["Målerklokke (lokal tid)"])
         self.assertEqual(by_kind["Siste avlesning (UTC)"]["device_class"], "timestamp")

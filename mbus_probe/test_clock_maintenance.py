@@ -188,14 +188,53 @@ class ClockMaintenanceTests(unittest.TestCase):
             read_clock.side_effect = None
             read_clock.return_value = {"meter_local_time": "2026-11-23T04:00", "meter_summer_time": False}
             if abs(seconds) > 120:
-                read_clock.side_effect = [read_clock.return_value,
-                    {"meter_local_time": now.isoformat(timespec="minutes").split("+")[0], "meter_summer_time": False}]
+                initial = read_clock.return_value
+                def simulated_read(*args):
+                    if not ser.sent:
+                        return initial
+                    return {"meter_local_time": now.isoformat(timespec="minutes").split("+")[0],
+                            "meter_summer_time": False}
+                read_clock.side_effect = simulated_read
             ser = FakeSerial()
+            def advance(n):
+                nonlocal now
+                now += timedelta(seconds=n)
             result = sync_once("/dev/ttyUSB0", 2400, 7, "12345678", "Europe/Oslo",
-                               serial_factory=lambda *a, **k: ser, sleep=lambda _: None,
+                               serial_factory=lambda *a, **k: ser, sleep=advance,
                                now=lambda: now, auto=True, allow_auto_write=True)
             self.assertEqual(result["changed"], abs(seconds) > 120)
             self.assertEqual(len(ser.sent), int(abs(seconds) > 120))
+
+    @patch("clock_maintenance._read_clock")
+    def test_minute_boundary_and_cancel(self, read_clock):
+        from datetime import timedelta
+        for second in (0, 30, 59):
+            for cancel in (False, True):
+                now = self.now.replace(second=second)
+                read_clock.side_effect = [
+                    {"meter_local_time": "2026-11-23T04:00", "meter_summer_time": False},
+                    {"meter_local_time": "2026-11-23T04:02", "meter_summer_time": False}]
+                ser = FakeSerial()
+                sent = []
+                original = ser.write
+                def write(data):
+                    sent.append(now)
+                    original(data)
+                ser.write = write
+                def advance(n):
+                    nonlocal now
+                    now += timedelta(seconds=n)
+                args = ("/dev/ttyUSB0", 2400, 7, "12345678", "Europe/Oslo")
+                kwargs = dict(serial_factory=lambda *a, **k: ser, sleep=advance,
+                              now=lambda: now, cancelled=lambda: cancel)
+                if cancel:
+                    with self.assertRaisesRegex(ValueError, "cancelled"):
+                        sync_once(*args, **kwargs)
+                    self.assertEqual(sent, [])
+                else:
+                    sync_once(*args, **kwargs)
+                    self.assertEqual(len(sent), 1)
+                    self.assertEqual(sent[0].second, 0)
 
     def test_daily_local_slot_winter_and_summer(self):
         from datetime import timezone
