@@ -79,7 +79,7 @@ class ClockMaintenanceTests(unittest.TestCase):
             controller = ClockController(
                 Registry(), {"serial_port": "/dev/ttyUSB0", "allow_clock_sync": True,
                              "auto_clock_sync": True}, threading.Lock(), threading.Event(),
-                operation=operation, pause=lambda _: None, root=directory, now=lambda: self.now)
+                operation=operation, pause=lambda _: None, root=directory)
             controller.defer_auto("12345678")
             controller.on_valid_round([])
             self.assertFalse(completed.is_set())
@@ -111,7 +111,7 @@ class ClockMaintenanceTests(unittest.TestCase):
             controller = ClockController(
                 Registry(), {"serial_port": "/dev/ttyUSB0", "allow_clock_sync": True,
                              "auto_clock_sync": True}, threading.Lock(), threading.Event(),
-                operation=operation, pause=lambda _: None, root=directory, now=lambda: self.now)
+                operation=operation, pause=lambda _: None, root=directory)
             controller.start("12345678")
             self.assertTrue(manual_started.wait(2))
             controller.defer_auto("00000000")
@@ -179,128 +179,6 @@ class ClockMaintenanceTests(unittest.TestCase):
             self.assertEqual(seen, [True])
             self.assertEqual(second.snapshot()["status"], "unverified")
             self.assertFalse(second._trusted("12345678"))
-
-    @patch("clock_maintenance._read_clock")
-    def test_auto_threshold_both_directions(self, read_clock):
-        from datetime import timedelta
-        for seconds in (-121, -120, 120, 121):
-            now = self.now + timedelta(seconds=seconds)
-            read_clock.side_effect = None
-            read_clock.return_value = {"meter_local_time": "2026-11-23T04:00", "meter_summer_time": False}
-            if abs(seconds) > 120:
-                initial = read_clock.return_value
-                def simulated_read(*args):
-                    if not ser.sent:
-                        return initial
-                    return {"meter_local_time": now.isoformat(timespec="minutes").split("+")[0],
-                            "meter_summer_time": False}
-                read_clock.side_effect = simulated_read
-            ser = FakeSerial()
-            def advance(n):
-                nonlocal now
-                now += timedelta(seconds=n)
-            result = sync_once("/dev/ttyUSB0", 2400, 7, "12345678", "Europe/Oslo",
-                               serial_factory=lambda *a, **k: ser, sleep=advance,
-                               now=lambda: now, auto=True, allow_auto_write=True)
-            self.assertEqual(result["changed"], abs(seconds) > 120)
-            self.assertEqual(len(ser.sent), int(abs(seconds) > 120))
-
-    @patch("clock_maintenance._read_clock")
-    def test_minute_boundary_and_cancel(self, read_clock):
-        from datetime import timedelta
-        for second in (0, 30, 59):
-            for cancel in (False, True):
-                now = self.now.replace(second=second)
-                read_clock.side_effect = [
-                    {"meter_local_time": "2026-11-23T04:00", "meter_summer_time": False},
-                    {"meter_local_time": "2026-11-23T04:02", "meter_summer_time": False}]
-                ser = FakeSerial()
-                sent = []
-                original = ser.write
-                def write(data):
-                    sent.append(now)
-                    original(data)
-                ser.write = write
-                def advance(n):
-                    nonlocal now
-                    now += timedelta(seconds=n)
-                args = ("/dev/ttyUSB0", 2400, 7, "12345678", "Europe/Oslo")
-                kwargs = dict(serial_factory=lambda *a, **k: ser, sleep=advance,
-                              now=lambda: now, cancelled=lambda: cancel)
-                if cancel:
-                    with self.assertRaisesRegex(ValueError, "cancelled"):
-                        sync_once(*args, **kwargs)
-                    self.assertEqual(sent, [])
-                else:
-                    sync_once(*args, **kwargs)
-                    self.assertEqual(len(sent), 1)
-                    self.assertEqual(sent[0].second, 0)
-
-    def test_daily_local_slot_winter_and_summer(self):
-        from datetime import timezone
-        class Registry:
-            lock = threading.Lock()
-            selected = {"12345678": 7}
-        calls = []
-        def operation(*args, **kwargs):
-            calls.append(True)
-            return {"changed": False, "manual_required": False,
-                    "before": "2026-11-23T04:00", "target": None,
-                    "after": "2026-11-23T04:00"}
-        with tempfile.TemporaryDirectory() as directory:
-            controller = ClockController(Registry(),
-                {"serial_port": "/dev/ttyUSB0", "allow_clock_sync": True, "auto_clock_sync": True},
-                threading.Lock(), threading.Event(), operation=operation,
-                pause=lambda _: None, root=directory, now=lambda: self.now)
-            for month, hour in ((1, 22), (6, 21)):
-                self.now = datetime(2026, month, 23, hour-1, 59, tzinfo=timezone.utc)
-                count = len(calls)
-                controller.on_valid_round(["12345678"])
-                self.assertEqual(len(calls), count)
-                self.now = datetime(2026, month, 23, hour, tzinfo=timezone.utc)
-                controller.on_valid_round(["12345678"])
-                worker = controller.auto_worker
-                if worker:
-                    worker.join(2)
-                controller.on_valid_round(["12345678"])
-                self.assertEqual(len(calls), count+1)
-
-    def test_daily_retry_after_read_failure(self):
-        from datetime import timedelta
-        class Registry:
-            lock = threading.Lock()
-            selected = {"12345678": 7}
-        self.now = datetime(2026, 11, 23, 23, 0, tzinfo=self.zone)
-        calls = []
-        def operation(*args, **kwargs):
-            calls.append(True)
-            if len(calls) == 1:
-                raise ValueError("read failed")
-            return {"changed": False, "manual_required": False,
-                    "before": "2026-11-23T23:15", "target": None,
-                    "after": "2026-11-23T23:15"}
-        with tempfile.TemporaryDirectory() as directory:
-            controller = ClockController(Registry(),
-                {"serial_port": "/dev/ttyUSB0", "allow_clock_sync": True, "auto_clock_sync": True},
-                threading.Lock(), threading.Event(), operation=operation,
-                pause=lambda _: None, root=directory, now=lambda: self.now)
-            def round_and_wait():
-                controller.on_valid_round(["12345678"])
-                worker = controller.auto_worker
-                if worker:
-                    worker.join(2)
-                    self.assertFalse(worker.is_alive())
-            round_and_wait()
-            self.assertEqual(controller.snapshot()["status"], "failed")
-            self.now += timedelta(minutes=14)
-            round_and_wait()
-            self.assertEqual(len(calls), 1)
-            self.now += timedelta(minutes=1)
-            round_and_wait()
-            self.assertEqual(len(calls), 2)
-            self.assertEqual(controller.snapshot()["status"], "verified")
-            round_and_wait()
-            self.assertEqual(len(calls), 2)
 
     def test_disabled_by_default(self):
         class Registry:

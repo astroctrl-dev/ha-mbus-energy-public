@@ -50,8 +50,7 @@ def _read_clock(port, baud, address, meter_id, reader):
 
 def sync_once(port, baud, address, meter_id, zone_name, *, reader=read_one,
               sleep=time.sleep, now=lambda: datetime.now(timezone.utc),
-              serial_factory=None, on_write=None, auto=False, allow_auto_write=False,
-              cancelled=lambda: False):
+              serial_factory=None, on_write=None, auto=False, allow_auto_write=False):
     """Read, write once, then read back. An ACK alone never counts as success."""
     if baud not in (300, 2400):
         raise ValueError("unsupported baud rate")
@@ -59,10 +58,10 @@ def sync_once(port, baud, address, meter_id, zone_name, *, reader=read_one,
     before = _read_clock(port, baud, address, meter_id, reader)
     old = datetime.fromisoformat(before["meter_local_time"]).replace(tzinfo=zone)
     current = now().astimezone(zone)
-    if auto and abs((current - old).total_seconds()) <= 120:
+    if auto and abs((current - old).total_seconds()) <= 120 and before["meter_summer_time"] == bool(current.dst()):
         return {"before": before["meter_local_time"], "target": None,
                 "after": before["meter_local_time"], "changed": False,
-                "manual_required": before["meter_summer_time"] != bool(current.dst()),
+                "manual_required": False,
                 "verified_at_utc": now().astimezone(timezone.utc).isoformat(timespec="seconds")}
     if auto and (not allow_auto_write or abs((current - old).total_seconds()) > 300):
         return {"before": before["meter_local_time"], "target": None,
@@ -70,36 +69,17 @@ def sync_once(port, baud, address, meter_id, zone_name, *, reader=read_one,
                 "manual_required": True,
                 "verified_at_utc": now().astimezone(timezone.utc).isoformat(timespec="seconds")}
     sleep(61)  # Battery-powered meter; no back-to-back requests.
+    target = now().astimezone(zone)
+    command = set_clock_frame(address, target)
     if serial_factory is None:
         import serial
         serial_factory = serial.Serial
+    if on_write:
+        on_write(before["meter_local_time"], target.isoformat(timespec="minutes"))
     with serial_factory(port, baudrate=baud, bytesize=8, parity="E", stopbits=1,
                         timeout=5, write_timeout=5, exclusive=True) as ser:
         ser.reset_input_buffer()
-        # Prepare the port before waiting. Re-evaluate time after each wakeup.
-        for _ in range(5):
-            if cancelled():
-                raise ValueError("clock sync cancelled before write")
-            target = now().astimezone(zone)
-            offset = target.second + target.microsecond / 1e6
-            if offset >= 1:
-                sleep(60 - offset)
-                continue
-            if on_write:
-                on_write(before["meter_local_time"], target.isoformat(timespec="minutes"))
-            actual_send = now().astimezone(zone)
-            if (actual_send.replace(second=0, microsecond=0).timestamp() !=
-                    target.replace(second=0, microsecond=0).timestamp()
-                    or actual_send.second >= 1):
-                continue
-            if cancelled():
-                raise ValueError("clock sync cancelled before write")
-            ser.write(set_clock_frame(address, actual_send))
-            LOG.info("Clock command sent at %s; minute offset %.3f s",
-                     actual_send.isoformat(), actual_send.microsecond / 1e6)
-            break
-        else:
-            raise ValueError("missed clock write window")
+        ser.write(command)
         ser.flush()
         if ser.read(1) != b"\xe5":
             raise ValueError("clock command not acknowledged")
@@ -119,8 +99,7 @@ def sync_once(port, baud, address, meter_id, zone_name, *, reader=read_one,
 
 class ClockController:
     def __init__(self, registry, config, bus_lock, stop, operation=sync_once, pause=time.sleep,
-                 history_blocked=None, root="/data/analysis",
-                 now=lambda: datetime.now(timezone.utc)):
+                 history_blocked=None, root="/data/analysis"):
         self.registry, self.config, self.bus_lock, self.stop = registry, config, bus_lock, stop
         self.operation, self.pause, self.history_blocked = operation, pause, history_blocked
         self.root = Path(root)
@@ -130,9 +109,6 @@ class ClockController:
         self.auto_pending = set()
         self.auto_ready = []
         self.auto_worker = None
-        self.now = now
-        self.daily_slots = {}
-        self.daily_retry_at = {}
 
     def defer_auto(self, meter_id):
         """Wait for a fresh normal measurement before reserving the bus."""
@@ -142,19 +118,13 @@ class ClockController:
 
     def on_valid_round(self, meter_ids):
         """Called after all selected meters complete a normal polling round."""
-        if self.stop.is_set() or not self.config.get('auto_clock_sync') or not self.config.get('allow_clock_sync'):
+        if self.stop.is_set():
             return
-        local = self.now().astimezone(ZoneInfo(self.config.get('clock_timezone', 'Europe/Oslo')))
         with self.lock:
             for meter_id in meter_ids:
-                if (local.hour >= 23 and self.daily_slots.get(meter_id) != local.date()
-                        and self.now().timestamp() >= self.daily_retry_at.get(meter_id, 0)):
-                    self.daily_slots[meter_id] = local.date()
-                    self.auto_pending.add(meter_id)
                 if meter_id in self.auto_pending:
                     self.auto_pending.remove(meter_id)
-                    if meter_id not in self.auto_ready:
-                        self.auto_ready.append(meter_id)
+                    self.auto_ready.append(meter_id)
             if self.auto_ready and (self.auto_worker is None or not self.auto_worker.is_alive()):
                 self.auto_worker = threading.Thread(target=self._run_auto_queue, daemon=True)
                 self.auto_worker.start()
@@ -169,10 +139,6 @@ class ClockController:
             try:
                 self.start(meter_id, auto=True)
                 self.worker.join()
-                with self.lock:
-                    if self.state['status'] == 'failed':
-                        self.daily_slots.pop(meter_id, None)
-                        self.daily_retry_at[meter_id] = self.now().timestamp() + 900
             except ValueError as exc:
                 if str(exc) == "clock sync already running" and self.worker:
                     # A manual operation has priority; retry after it finishes.
@@ -180,9 +146,6 @@ class ClockController:
                     with self.lock:
                         self.auto_ready.insert(0, meter_id)
                 else:
-                    with self.lock:
-                        self.daily_slots.pop(meter_id, None)
-                        self.daily_retry_at[meter_id] = self.now().timestamp() + 900
                     LOG.warning("Automatic clock check skipped: %s", type(exc).__name__)
 
     def _path(self, meter_id):
@@ -245,16 +208,12 @@ class ClockController:
                     if self.registry.selected.get(meter_id) != address or self.stop.is_set():
                         raise ValueError("selected meter changed or app is stopping")
                 self.pause(61)  # Previous normal poll/scan may have just finished.
-                if self.stop.is_set() or (self.history_blocked and self.history_blocked.is_set()):
-                    raise ValueError("app stopping or normal frame unverified")
                 try:
                     result = self.operation(
                         self.config["serial_port"], int(self.config.get("baud", 2400)),
                         address, meter_id, self.config.get("clock_timezone", "Europe/Oslo"),
                         on_write=on_write, auto=auto,
-                        allow_auto_write=self._trusted(meter_id),
-                        cancelled=lambda: self.stop.is_set() or bool(
-                            self.history_blocked and self.history_blocked.is_set()))
+                        allow_auto_write=self._trusted(meter_id))
                 finally:
                     self.pause(61)  # Preserve spacing even after a failed read or write.
             if result["changed"]:

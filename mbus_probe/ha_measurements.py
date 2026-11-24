@@ -11,7 +11,7 @@ SENSORS = {
     "flow": ("m3/h", "volume_flow_rate", "measurement"),
     "flow_temperature": ("C", "temperature", "measurement"),
     "return_temperature": ("C", "temperature", "measurement"),
-    "temperature_difference": ("K", "temperature_delta", "measurement"),
+    "temperature_difference": ("K", None, "measurement"),
     "operating_time": ("h", None, "total_increasing"),
     "flow_time": ("h", None, "total_increasing"),
     "missing_time": ("h", None, "total_increasing"),

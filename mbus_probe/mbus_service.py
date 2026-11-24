@@ -19,7 +19,7 @@ from mqtt_bridge import (BRIDGE_AVAILABILITY, cleanup_discovery,
 from meter_registry import MeterRegistry
 from meter_ui import serve
 from history_controller import load_history
-from mqtt_bridge import publish_history, history_discovery_messages
+from mqtt_bridge import publish_history
 
 LOG = logging.getLogger("mbus")
 STOP = threading.Event()
@@ -127,25 +127,6 @@ def poll_once(config, client):
 def run(config, client, registry=None, bus_lock=None, history_controller=None,
         request_pacer=None, on_valid_round=None):
     """Fail closed on any bad poll. MQTT Last Will also handles abrupt termination."""
-    history_discovery_confirmed = set()
-    history_discovery_inflight = set()
-    history_discovery_lock = threading.Lock()
-
-    def publish_history_async(meter_id):
-        try:
-            with history_controller.publication_lock if history_controller else nullcontext():
-                if registry:
-                    with registry.lock:
-                        if meter_id not in registry.selected:
-                            return
-                publish_history_discovery(client, meter_id)
-            with history_discovery_lock:
-                history_discovery_confirmed.add(meter_id)
-        except (OSError, ValueError, ConnectionError, RuntimeError) as exc:
-            LOG.warning("MQTT history discovery retry pending: %s", type(exc).__name__)
-        finally:
-            with history_discovery_lock:
-                history_discovery_inflight.discard(meter_id)
     while not STOP.is_set():
         if history_controller and history_controller.blocked.is_set():
             client.publish(BRIDGE_AVAILABILITY, "offline", qos=1, retain=True)
@@ -154,7 +135,7 @@ def run(config, client, registry=None, bus_lock=None, history_controller=None,
         if registry:
             for meter_id in list(registry.pending_cleanup):
                 try:
-                    with (history_controller.publication_lock if history_controller else nullcontext()), bus_lock, registry.lock:
+                    with bus_lock, registry.lock:
                         if meter_id not in registry.pending_cleanup or meter_id in registry.selected:
                             continue
                         cleanup_discovery(client, meter_id)
@@ -180,14 +161,6 @@ def run(config, client, registry=None, bus_lock=None, history_controller=None,
                 LOG.info("Valid T230 frame: %d current measurements, %d unavailable",
                          len(values), len(SENSORS) - len(values))
                 valid_meter_ids.append(row["meter_id"])
-                with history_discovery_lock:
-                    schedule_history = (row["meter_id"] not in history_discovery_confirmed
-                                        and row["meter_id"] not in history_discovery_inflight)
-                    if schedule_history:
-                        history_discovery_inflight.add(row["meter_id"])
-                if schedule_history:
-                    threading.Thread(target=publish_history_async, args=(row["meter_id"],),
-                                     daemon=True).start()
             except (OSError, ValueError, ConnectionError, RuntimeError) as exc:
                 LOG.warning("T230 unavailable at primary address %d: %s", row["address"], exc)
                 try:
@@ -212,36 +185,18 @@ def on_broker_connect(client, registry):
 
 
 
-def publish_history_discovery(client, meter_id):
-    """Publish and confirm all 47 retained history discovery messages."""
-    count = 0
-    for topic, payload, retain in history_discovery_messages(meter_id):
-        result = client.publish(topic, payload, qos=1, retain=retain)
-        if result.rc:
-            raise ConnectionError("MQTT history discovery publish failed")
-        result.wait_for_publish(timeout=5)
-        if not result.is_published():
-            raise ConnectionError("MQTT history discovery PUBACK timeout")
-        count += 1
-    LOG.info("MQTT history discovery acknowledged: %d entities for selected meter", count)
-    return count
-
-
 def publish_saved_history(client, registry):
     """Run outside Paho's on_connect callback so PUBACKs can be processed."""
     try:
-        selected = registry.snapshot()["selected"]
-        LOG.info("MQTT history discovery startup: %d selected meters", len(selected))
-        for row in selected:
-            publish_history_discovery(client, row["meter_id"])
-        for alias, snapshot in load_history("/data/analysis", selected):
+        for alias, snapshot in load_history("/data/analysis", registry.snapshot()["selected"]):
+            # Match saved alias to the selected meter without exposing its ID.
             from history_controller import history_file
-            for row in selected:
+            for row in registry.snapshot()["selected"]:
                 if history_file("/data/analysis", row["meter_id"]).stem == alias:
                     publish_history(client, row["meter_id"], snapshot)
                     break
-    except (OSError, ValueError, ConnectionError, RuntimeError) as exc:
-        LOG.warning("MQTT history discovery or saved history publish failed: %s", type(exc).__name__)
+    except (OSError, ValueError, ConnectionError):
+        LOG.warning("Saved monthly history could not be published after broker reconnect")
 
 
 def main():
@@ -253,7 +208,6 @@ def main():
     import paho.mqtt.client as mqtt
     client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
                          client_id="mbus_t230_bridge")
-    server = serve(registry, config, client, bus_lock, STOP)
     history_publish_lock = threading.Lock()
     def on_connect(mqtt_client, _userdata, _flags, reason_code, _properties):
         if not reason_code.is_failure:
@@ -261,16 +215,7 @@ def main():
             if history_publish_lock.acquire(blocking=False):
                 def republish():
                     try:
-                        for row in registry.snapshot()['selected']:
-                            try:
-                                with server.history_controller.publication_lock:
-                                    with registry.lock:
-                                        if row['meter_id'] not in registry.selected:
-                                            continue
-                                    publish_history_discovery(mqtt_client, row['meter_id'])
-                            except (OSError, ValueError, ConnectionError, RuntimeError):
-                                LOG.warning('History discovery reconnect failed')
-                        server.history_controller.queue_saved_publication()
+                        publish_saved_history(mqtt_client, registry)
                     finally:
                         history_publish_lock.release()
                 threading.Thread(target=republish, daemon=True).start()
@@ -284,18 +229,13 @@ def main():
     client.connect(config["mqtt_host"], int(config.get("mqtt_port", 1883)),
                    keepalive=60)
     client.loop_start()
+    server = serve(registry, config, client, bus_lock, STOP)
     if config.get("auto_clock_sync"):
         for row in registry.snapshot()["selected"]:
             server.clock_controller.defer_auto(row["meter_id"])
-    from history_controller import HistorySchedule
-    history_schedule = HistorySchedule(server.history_controller)
-    def on_valid_round(meter_ids):
-        server.history_controller.retry_publication()
-        server.clock_controller.on_valid_round(meter_ids)
-        history_schedule.on_valid_round(meter_ids)
     try:
         run(config, client, registry, bus_lock, server.history_controller, RequestPacer(),
-            on_valid_round)
+            server.clock_controller.on_valid_round)
     finally:
         try:
             server.shutdown()
