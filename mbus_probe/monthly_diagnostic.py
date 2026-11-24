@@ -4,12 +4,17 @@ CI=50 application reset changes volatile interface frame selection. The CLI requ
 """
 import argparse
 import json
+import logging
 import sys
 import time
 from datetime import datetime, timezone
 from clock_model import clock_observation
 from mbus_probe import validate
 from ha_measurements import select_measurements
+
+
+LOG = logging.getLogger("mbus.history.sequence")
+MIN_REQUEST_INTERVAL = 61.0
 
 
 class RestorationError(RuntimeError):
@@ -90,20 +95,25 @@ def run(port, baud, address, meter_id, timeout=5):
         months = None
         normal_clock = None
         history_read_at_utc = None
+        def send(command):
+            nonlocal last_request_at
+            if last_request_at is not None:
+                time.sleep(max(0.0, MIN_REQUEST_INTERVAL - (time.monotonic() - last_request_at)))
+            ser.reset_input_buffer()
+            last_request_at = time.monotonic()
+            ser.write(command)
+            ser.flush()
+
         try:
             selected = True  # Attempt restore even if write/ACK fails.
-            last_request_at = time.monotonic()
-            ser.write(select_frame_three(address))
-            ser.flush()
+            LOG.info("Monthly history: selecting historical frame")
+            send(select_frame_three(address))
             if read_response(ser) != b"\xe5":
                 raise ValueError("frame selection was not acknowledged")
             # Battery-powered T230: leave more than one minute before each read.
-            time.sleep(max(0.0, 61.0 - (time.monotonic() - last_request_at)))
-            ser.reset_input_buffer()
             req = bytes((0x10, 0x5B, address, (0x5B + address) & 255, 0x16))
-            last_request_at = time.monotonic()
-            ser.write(req)
-            ser.flush()
+            LOG.info("Monthly history: reading historical frame")
+            send(req)
             frame = read_response(ser)
             history_read_at_utc = datetime.now(timezone.utc).isoformat()
             header = validate(frame)
@@ -113,17 +123,14 @@ def run(port, baud, address, meter_id, timeout=5):
         finally:
             if selected:
                 try:
-                    ser.reset_input_buffer()
-                    ser.write(restore_normal_frame(address))
-                    ser.flush()
+                    LOG.info("Monthly history: restoring normal frame")
+                    send(restore_normal_frame(address))
                     if read_response(ser) != b"\xe5":
                         raise ValueError("restore was not acknowledged")
                     # ACK alone does not prove that ordinary records are back.
-                    time.sleep(max(0.0, 61.0 - (time.monotonic() - last_request_at)))
-                    ser.reset_input_buffer()
                     req = bytes((0x10, 0x5B, address, (0x5B + address) & 255, 0x16))
-                    ser.write(req)
-                    ser.flush()
+                    LOG.info("Monthly history: verifying normal frame")
+                    send(req)
                     normal_frame = read_response(ser)
                     verify_normal_frame(normal_frame, address, meter_id)
                     try:
@@ -132,8 +139,10 @@ def run(port, baud, address, meter_id, timeout=5):
                     except (ValueError, KeyError):
                         normal_clock = None  # Valid history stays available without a usable clock.
                     # Leave the bus idle before regular polling resumes.
-                    time.sleep(61)
+                    time.sleep(MIN_REQUEST_INTERVAL)
+                    LOG.info("Monthly history: normal frame verified")
                 except Exception as exc:
+                    LOG.warning("Monthly history restore failed: %s", str(exc) if isinstance(exc, ValueError) else type(exc).__name__)
                     raise RestorationError("normal frame not verified; stop polling") from exc
         return months, normal_clock, history_read_at_utc
 

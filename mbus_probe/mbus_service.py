@@ -198,8 +198,10 @@ def publish_saved_history(client, registry):
                 if history_file("/data/analysis", row["meter_id"]).stem == alias:
                     publish_history(client, row["meter_id"], snapshot)
                     break
-    except (OSError, ValueError, ConnectionError):
-        LOG.warning("Saved monthly history could not be published after broker reconnect")
+        return True
+    except (OSError, ValueError, ConnectionError, RuntimeError):
+        LOG.warning("Saved monthly history could not be published; retry pending")
+        return False
 
 
 def main():
@@ -218,7 +220,11 @@ def main():
             if history_publish_lock.acquire(blocking=False):
                 def republish():
                     try:
-                        publish_saved_history(mqtt_client, registry)
+                        while not STOP.is_set():
+                            if publish_saved_history(mqtt_client, registry):
+                                break
+                            if STOP.wait(120):
+                                break
                     finally:
                         history_publish_lock.release()
                 threading.Thread(target=republish, daemon=True).start()
