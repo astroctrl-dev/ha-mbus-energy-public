@@ -1,5 +1,5 @@
 name: "M-Bus T230 Energy Metering"
-version: "2.2.0"
+version: "2.2.1"
 slug: "mbus_probe"
 description: "Read T230 via M-Bus, publish measurements using MQTT Discovery, and retrieve monthly history automatically or on demand."
 arch:
