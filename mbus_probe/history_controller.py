@@ -1,4 +1,4 @@
-"""Explicit, gated frame-3 collection. Never called by polling or download."""
+"""Gated frame-3 collection, manual or scheduled."""
 import json
 import logging
 import os
@@ -49,12 +49,15 @@ class HistoryController:
                       "error": "Normalramme ikke verifisert; polling stoppet" if self.blocked.is_set() else None,
                       "captured_at_utc": None}
         self.worker = None
+        self.publish_pending = {}
+        self.publish_worker = None
+        self.publication_lock = threading.Lock()
 
     def snapshot(self):
         with self.lock:
             return dict(self.state)
 
-    def start(self, meter_id):
+    def start(self, meter_id, completion=None):
         if self.config.get("allow_monthly_history") is not True:
             raise ValueError("Aktiver månedshistorikk i appens Configuration først")
         if self.stop.is_set() or self.blocked.is_set():
@@ -67,10 +70,54 @@ class HistoryController:
             if self.state["status"] == "running":
                 raise ValueError("monthly history is already running")
             self.state = {"status": "running", "error": None, "captured_at_utc": None}
-            self.worker = threading.Thread(target=self._collect, args=(meter_id, address), daemon=True)
+            self.worker = threading.Thread(target=self._collect, args=(meter_id, address, completion), daemon=True)
             self.worker.start()
 
-    def _collect(self, meter_id, address):
+    def queue_saved_publication(self):
+        """Reload durable snapshots on reconnect without replacing newer pending data."""
+        for row in self.registry.snapshot()["selected"]:
+            meter_id = row["meter_id"]
+            try:
+                with self.lock:
+                    path = history_file(self.root, meter_id)
+                    if path.exists():
+                        snapshot = json.loads(path.read_text(encoding="utf-8"))
+                        self.publish_pending.setdefault(meter_id, snapshot)
+            except (OSError, ValueError):
+                LOG.warning("Saved history could not be queued")
+        self.retry_publication()
+
+    def retry_publication(self):
+        """Retry saved snapshots outside the physical bus lock."""
+        with self.lock:
+            if not self.publish_pending or self.stop.is_set():
+                return
+            if self.publish_worker and self.publish_worker.is_alive():
+                return
+            self.publish_worker = threading.Thread(target=self._publish_pending, daemon=True)
+            self.publish_worker.start()
+
+    def _publish_pending(self):
+        with self.lock:
+            pending = list(self.publish_pending.items())
+        for meter_id, snapshot in pending:
+            try:
+                with self.publication_lock:
+                    with self.registry.lock:
+                        selected = meter_id in self.registry.selected
+                    if selected and not self.stop.is_set():
+                        self.on_complete(meter_id, snapshot)
+                    elif self.stop.is_set():
+                        return
+            except (OSError, ValueError, ConnectionError, RuntimeError):
+                LOG.warning("History saved but MQTT publication failed; retry pending")
+                continue
+            with self.lock:
+                if self.publish_pending.get(meter_id) is snapshot:
+                    self.publish_pending.pop(meter_id, None)
+
+    def _collect(self, meter_id, address, completion=None):
+        success = False
         try:
             with self.bus_lock:
                 with self.registry.lock:
@@ -78,12 +125,20 @@ class HistoryController:
                         raise ValueError("selected meter changed or app is stopping")
                 # A normal poll or scan may have finished immediately before the lock.
                 self.pause(61)
+                if self.stop.is_set() or self.blocked.is_set():
+                    raise ValueError("app stopping or normal frame unverified")
                 # Marker survives process crash. Clear only after verified restore.
                 self.root.mkdir(parents=True, exist_ok=True)
                 fd = os.open(self.marker, os.O_WRONLY | os.O_CREAT, 0o600)
                 os.close(fd)
-                result = self.reader(self.config["serial_port"], int(self.config.get("baud", 2400)),
-                                     address, meter_id)
+                try:
+                    result = self.reader(self.config["serial_port"], int(self.config.get("baud", 2400)),
+                                         address, meter_id)
+                except Exception:
+                    self.blocked.set()  # Set before releasing the shared bus.
+                    raise
+                finally:
+                    self.pause(61)
                 # The reader returns only after a checksum/identity-verified normal frame.
                 self.marker.unlink()
                 if isinstance(result, tuple):
@@ -121,13 +176,13 @@ class HistoryController:
                     "confirmed_shift" if detect_month_shift(previous, snapshot) else "not_observed")
                 save_snapshot(path, snapshot)
                 if self.on_complete:
-                    try:
-                        self.on_complete(meter_id, snapshot)
-                    except (OSError, ValueError, ConnectionError):
-                        LOG.warning("History saved but MQTT publication failed")
+                    with self.lock:
+                        self.publish_pending[meter_id] = snapshot
+                    self.retry_publication()
                 with self.lock:
                     self.state = {"status": "complete", "error": None,
                                   "captured_at_utc": snapshot["captured_at_utc"]}
+            success = True
         except Exception as exc:
             # No ID, raw telegram, serial path or exception details in UI/logs.
             uncertain = isinstance(exc, RestorationError) or self.marker.exists()
@@ -141,3 +196,65 @@ class HistoryController:
                               "error": "Normalramme ikke verifisert; polling stoppet" if uncertain
                                        else "Historikkavlesning feilet; tidligere data beholdt",
                               "captured_at_utc": None}
+
+        finally:
+            if completion:
+                completion(success)
+
+
+class HistorySchedule:
+    """Schedule per meter after valid normal rounds, without blocking polling."""
+    def __init__(self, controller, now=lambda: datetime.now(timezone.utc),
+                 monotonic=time.monotonic, retry_seconds=900):
+        from zoneinfo import ZoneInfo
+        self.controller = controller
+        self.zone = ZoneInfo(controller.config.get("clock_timezone", "Europe/Oslo"))
+        self.now, self.monotonic = now, monotonic
+        self.retry_seconds = retry_seconds
+        self.lock = threading.Lock()
+        self.started = set()
+        self.completed = {}
+        self.retry_at = {}
+        self.pending = {}
+        self.active = False
+
+    def on_valid_round(self, meter_ids):
+        c = self.controller
+        if not c.config.get("allow_monthly_history") or c.stop.is_set() or c.blocked.is_set():
+            return
+        local = self.now().astimezone(self.zone)
+        slot = local.date() if local.day in (1, 2) and local.hour >= 1 else None
+        with self.lock:
+            if self.active:
+                return
+            for meter_id in meter_ids:
+                if slot is not None and self.completed.get(meter_id) != slot:
+                    self.pending[meter_id] = slot
+            for meter_id in meter_ids:
+                if self.monotonic() < self.retry_at.get(meter_id, 0):
+                    continue
+                if meter_id in self.started and meter_id not in self.pending:
+                    continue
+                requested_slot = self.pending.get(meter_id)
+                self.active = True
+                break
+            else:
+                return
+
+        def finished(success):
+            with self.lock:
+                if success:
+                    self.started.add(meter_id)
+                    if requested_slot is not None:
+                        self.completed[meter_id] = requested_slot
+                        if self.pending.get(meter_id) == requested_slot:
+                            self.pending.pop(meter_id, None)
+                    self.retry_at.pop(meter_id, None)
+                else:
+                    self.retry_at[meter_id] = self.monotonic() + self.retry_seconds
+                self.active = False
+
+        try:
+            c.start(meter_id, completion=finished)
+        except (ValueError, RuntimeError):
+            finished(False)
