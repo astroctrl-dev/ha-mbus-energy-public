@@ -130,7 +130,9 @@ def run(config, client, registry=None, bus_lock=None, history_controller=None,
     while not STOP.is_set():
         if history_controller and history_controller.blocked.is_set():
             client.publish(BRIDGE_AVAILABILITY, "offline", qos=1, retain=True)
-            if not history_controller.recover_normal():
+            if history_controller.recover_normal():
+                client.publish(BRIDGE_AVAILABILITY, "online", qos=1, retain=True)
+            else:
                 STOP.wait(120)
             continue
         if registry:
@@ -162,7 +164,6 @@ def run(config, client, registry=None, bus_lock=None, history_controller=None,
                 LOG.info("Valid T230 frame: %d current measurements, %d unavailable",
                          len(values), len(SENSORS) - len(values))
                 valid_meter_ids.append(row["meter_id"])
-                client.publish(BRIDGE_AVAILABILITY, "online", qos=1, retain=True)
             except (OSError, ValueError, ConnectionError, RuntimeError) as exc:
                 LOG.warning("T230 unavailable at primary address %d: %s", row["address"], exc)
                 try:
