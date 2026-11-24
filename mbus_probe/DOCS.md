@@ -2,6 +2,16 @@
 
 Appen leser Landis+Gyr T230 via kablet M-Bus og publiserer gyldige aktuelle poster med MQTT Discovery. [Full installasjonsveiledning](https://github.com/astroctrl-dev/ha-mbus-energy-public/blob/main/INSTALLASJON.md) dekker kobling, oppdatering, kontroll og tilbakeføring.
 
+## Viktig oppgradering – v2.4.0
+
+**Vi anbefaler at alle brukere av tidligere versjoner oppgraderer til v2.4.0.**
+
+I tidligere versjoner var tidsstyringen av ordinære avlesninger, historikkinnhenting og klokkesynkronisering ikke fullt ut samordnet. Under enkelte forhold kunne forespørsler derfor komme for tett i forhold til målerens nødvendige kommunikasjonsintervall, med risiko for avbrutte eller manglende avlesninger.
+
+Fra v2.4.0 benytter alle appens M-Bus-sendinger en felles tidsstyring med minst 61 sekunders ventetid etter hvert sendeforsøk, også ved mislykket sending. Ordinær polling hopper over avlesningstidspunkter som ikke kan gjennomføres innenfor tidskravene. Dette gir mer forutsigbar kommunikasjon og bedre stabilitet.
+
+Ta sikkerhetskopi av appens data og konfigurasjon før oppgradering. Kontroller ordinær avlesning etter oppdatering.
+
 ## Innstillinger
 
 | Felt | Beskrivelse |
@@ -34,6 +44,6 @@ Når `allow_monthly_history` er aktivert, pauser **Hent månedshistorikk** ordin
 ### Recovery (2.3.2)
 Recovery logs validation errors and TX/response length. `recovery_raw_log` enables full local RX hex; disable after diagnosis and redact meter ID/data before sharing. `allow_recovery_interface_reset` defaults to false. Enable only on a verified single-meter bus after explicit approval: when a checksum-valid frame with matching address and meter ID contains all 24 history records, recovery may send the existing CI=50 normal interface selection command, wait for ACK and verify a fresh normal frame. No clock write or history collection. Guard remains on failure.
 
-## Timing and upgrade checks (2.4 development)
+## Timing and upgrade checks (2.4.0)
 
 The application uses one monotonic bus-wide transmission gate with at least 61 seconds between attempted sends. Standalone diagnostics must not share the app's serial device. Ordinary polling skips missed slots; manual jobs do not have an hourly exclusion window. Clock writes target the first second of an eligible minute; readback verifies only the meter's minute-resolution time. Automatic calendar jobs start after a valid poll in the configured hour, not necessarily at its beginning. With multiple meters, rotation increases effective per-meter intervals; a full address scan can take several hours. Multi-meter operation has not been physically verified. Preserve app data and options before updating; test ordinary polling, then manual history, then manual clock, then opt-in automation separately. Roll back to v2.3.4 if necessary, preserving the normal-frame recovery marker.
