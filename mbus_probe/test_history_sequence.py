@@ -64,7 +64,36 @@ class HistorySequenceTests(unittest.TestCase):
         self.assertEqual(serial.writes[2], bytes.fromhex("68 03 03 68 53 00 50 a3 16"))
         self.assertEqual(serial.writes[1], serial.writes[3])
         verify.assert_called_once_with(NORMAL_FRAME, 0, "00000000")
-        self.assertEqual(sleep.call_count, 3)
+        self.assertEqual(sleep.call_count, 4)
+
+    def test_all_commands_spaced_even_after_failed_selection(self):
+        for response, expected_writes in ((b"\xe5" + HISTORY_FRAME + b"\xe5" + NORMAL_FRAME, 4),
+                                          (b"\x00" + b"\xe5" + NORMAL_FRAME, 3)):
+            with self.subTest(expected_writes=expected_writes):
+                serial = SerialScript(response)
+                module = types.SimpleNamespace(Serial=lambda *_a, **_kw: serial)
+                clock = [0.0]
+                stamps = []
+                original_write = serial.write
+                def write(data):
+                    stamps.append(clock[0])
+                    original_write(data)
+                serial.write = write
+                def sleep(seconds):
+                    clock[0] += seconds
+                with patch.dict(sys.modules, {"serial": module}), \
+                     patch("monthly_diagnostic.validate", return_value=self.decoded), \
+                     patch("monthly_diagnostic.verify_normal_frame", return_value={"energy": 1}), \
+                     patch("monthly_diagnostic.time.monotonic", side_effect=lambda: clock[0]), \
+                     patch("monthly_diagnostic.time.sleep", side_effect=sleep):
+                    if expected_writes == 4:
+                        run("/dev/test", 2400, 0, "00000000")
+                    else:
+                        with self.assertRaisesRegex(ValueError, "selection was not acknowledged"):
+                            run("/dev/test", 2400, 0, "00000000")
+                self.assertEqual(len(stamps), expected_writes)
+                self.assertTrue(all(b-a >= 61 for a,b in zip(stamps, stamps[1:])))
+                self.assertGreaterEqual(clock[0]-stamps[-1], 61)
 
     def test_failed_restore_never_returns_months(self):
         serial = SerialScript(b"\xe5" + HISTORY_FRAME + b"\x00")
