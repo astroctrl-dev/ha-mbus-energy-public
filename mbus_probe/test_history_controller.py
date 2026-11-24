@@ -58,6 +58,23 @@ class HistoryControllerTests(unittest.TestCase):
         self.assertIsNone(list(wb["Månedshistorikk"].values)[1][4])
         self.assertEqual(list(wb["Månedsforbruk"].values)[1][3], 10)
 
+    def test_restore_failure_sets_guard_before_bus_unlock(self):
+        controller = self.controller(lambda *_: (_ for _ in ()).throw(
+            RestorationError("uncertain normal frame")))
+        real_lock = self.bus_lock
+        observed = []
+        class ObservedLock:
+            def __enter__(self):
+                real_lock.acquire()
+            def __exit__(self, *_):
+                observed.append(controller.blocked.is_set())
+                real_lock.release()
+        controller.bus_lock = ObservedLock()
+        controller.start("00000000")
+        controller.worker.join(3)
+        self.assertEqual(observed, [True])
+        self.assertEqual(controller.snapshot()["status"], "restore_unverified")
+
     def test_disabled_cannot_read_or_overwrite(self):
         self.config["allow_monthly_history"] = False
         controller = self.controller(lambda *_: self.fail("physical reader called"))

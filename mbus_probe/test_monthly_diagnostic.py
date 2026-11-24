@@ -51,6 +51,21 @@ class MonthlyDiagnosticTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             verify_normal_frame(normal[:-2] + bytes([normal[-2] ^ 1, normal[-1]]), 0, "00000000")
 
+    def test_restore_rejects_partial_history_but_accepts_invalid_individual_value(self):
+        from ha_measurements import REQUIRED_SENSORS, SENSORS
+        sample = {"type": "long", "control": 8, "address": 0, "ci": 0x72,
+                  "meter_id": "00000000", "manufacturer": "LUG", "medium_code": 4,
+                  "status": 0, "records": [
+                      {"kind": k, "current_record": True, "unit": SENSORS[k][0],
+                       "value": None if k == "power" else 1}
+                      for k in REQUIRED_SENSORS]}
+        with patch("monthly_diagnostic.validate", return_value=sample):
+            values = verify_normal_frame(b"synthetic", 0, "00000000")
+            self.assertNotIn("power", values)
+            sample["records"] = [r for r in sample["records"] if r["kind"] != "flow"]
+            with self.assertRaisesRegex(ValueError, "missing required"):
+                verify_normal_frame(b"synthetic", 0, "00000000")
+
     def test_secondary_subunit_cannot_replace_monthly_stand(self):
         sample = {"type": "long", "ci": 0x72, "meter_id": "12345678",
                   "manufacturer": "LUG", "medium_code": 4, "status": 0,

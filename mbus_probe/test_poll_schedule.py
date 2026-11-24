@@ -31,3 +31,20 @@ class ScheduleTests(unittest.TestCase):
 
     def test_utc_day_rollover(self):
         self.assertEqual(next_hour_delay(86390, 5), 5)
+
+
+class AlignedScheduleTests(unittest.TestCase):
+    def test_odd_minutes(self):
+        from poll_schedule import next_aligned_poll_wait
+        for now, delay in [(0, 60), (60, 120), (61.5, 118.5),
+                           (3540, 120), (3599, 61), (3600, 60)]:
+            self.assertEqual(next_aligned_poll_wait(120, now=now), delay)
+
+    def test_missed_slots_not_replayed(self):
+        from poll_schedule import next_aligned_poll_wait
+        self.assertEqual(next_aligned_poll_wait(120, now=422), 118)
+
+    def test_explicit_offset_shifts_whole_sequence(self):
+        from poll_schedule import next_aligned_poll_wait
+        self.assertEqual(next_aligned_poll_wait(120, True, 30, now=3451), 119)
+        self.assertEqual(next_aligned_poll_wait(120, True, 30, now=3570), 120)

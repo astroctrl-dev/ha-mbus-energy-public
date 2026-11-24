@@ -2,6 +2,7 @@
 
 CI=50 application reset changes volatile interface frame selection. The CLI requires confirmation; app use is gated by a disabled-by-default option.
 """
+from bus_timing import write_frame, shared_timing_active
 import argparse
 import json
 import logging
@@ -10,7 +11,7 @@ import time
 from datetime import datetime, timezone
 from clock_model import clock_observation
 from mbus_probe import validate
-from ha_measurements import select_measurements
+from ha_measurements import select_measurements, REQUIRED_SENSORS
 
 
 LOG = logging.getLogger("mbus.history.sequence")
@@ -74,11 +75,15 @@ def extract_months(frame, expected_id):
 
 
 def verify_normal_frame(frame, address, expected_id):
-    """ACK is insufficient: require a checksum-valid ordinary 7-value read."""
+    """Require ordinary record layout and at least one valid measurement."""
     decoded = validate(frame)
     if decoded.get("address") != address:
         raise ValueError("restored normal frame address mismatch")
-    return select_measurements(decoded, expected_id)
+    values = select_measurements(decoded, expected_id)
+    present = {r.get('kind') for r in decoded.get('records', ()) if r.get('current_record')}
+    if REQUIRED_SENSORS - present:
+        raise ValueError('restored normal frame missing required record types')
+    return values
 
 
 def run(port, baud, address, meter_id, timeout=5):
@@ -97,11 +102,11 @@ def run(port, baud, address, meter_id, timeout=5):
         history_read_at_utc = None
         def send(command):
             nonlocal last_request_at
-            if last_request_at is not None:
+            if last_request_at is not None and not shared_timing_active():
                 time.sleep(max(0.0, MIN_REQUEST_INTERVAL - (time.monotonic() - last_request_at)))
             ser.reset_input_buffer()
             last_request_at = time.monotonic()
-            ser.write(command)
+            write_frame(ser, command)
             ser.flush()
 
         try:
@@ -139,7 +144,8 @@ def run(port, baud, address, meter_id, timeout=5):
                     except (ValueError, KeyError):
                         normal_clock = None  # Valid history stays available without a usable clock.
                     # Leave the bus idle before regular polling resumes.
-                    time.sleep(MIN_REQUEST_INTERVAL)
+                    if not shared_timing_active():
+                        time.sleep(MIN_REQUEST_INTERVAL)
                     LOG.info("Monthly history: normal frame verified")
                 except Exception as exc:
                     LOG.warning("Monthly history restore failed: %s", str(exc) if isinstance(exc, ValueError) else type(exc).__name__)

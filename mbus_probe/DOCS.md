@@ -8,13 +8,14 @@ Appen leser Landis+Gyr T230 via kablet M-Bus og publiserer gyldige aktuelle post
 | --- | --- |
 | `serial_port` | Serieenheten som faktisk er tilgjengelig i Home Assistant OS. |
 | `baud` | Hastigheten dokumentert for måleren. |
-| `interval_seconds` | Normal lesing: 90, 120, 300 eller 600 sekunder; standard 120. Eldre v1-valg under 90 vises fremdeles for kompatibilitet, men kjøres som 120. Velg 90 eller høyere når du lagrer nye innstillinger. |
-| `read_before_full_hour` | Valgfri ekstra lesing før hel time, med minst 61 sekunder mellom busstilgangene. |
+| `interval_seconds` | Normal lesing: 90, 120, 300 eller 600 sekunder; standard 120. Ved 120 s leses normalt på oddetallsminutter (:01, :03 … :59). |
+| `read_before_full_hour` | Valgfri forskyvning av hele den faste avlesningsserien, ikke ekstra lesing. |
 | `seconds_before_full_hour` | Forskyvning 0–300 sekunder. |
 | `allow_clock_sync` | Tillater bekreftet manuell synk til HA-tid med verifisert tilbakelesning. Av som standard. |
-| `auto_clock_sync` | Valgfri sjekk ved oppstart etter første gyldige avlesning. Skriver bare etter tidligere verifisert manuell synk og ved avgrenset tidsavvik. |
+| `auto_clock_sync` | Valgfri sjekk ved oppstart og i timen fra kl. 23 lokal tid etter gyldig avlesning. Skriver bare etter tidligere verifisert manuell synk og ved avgrenset tidsavvik. |
 | `clock_timezone` | Målerens lokale tidssone, standard `Europe/Oslo`; kontroller før synk. |
 | `allow_monthly_history` | Aktiverer separat historikkhandling i webgrensesnittet. |
+| `auto_monthly_history` | Av som standard. Ved oppstart og 1. og 2. i måneden fra kl. 01 lokal tid etter gyldig avlesning. Krever allow_monthly_history. |
 | `mqtt_host` og `mqtt_port` | Broker, normalt `core-mosquitto:1883`. |
 | `mqtt_username` og `mqtt_password` | Legges inn lokalt og må ikke deles. |
 
@@ -32,3 +33,7 @@ Når `allow_monthly_history` er aktivert, pauser **Hent månedshistorikk** ordin
 
 ### Recovery (2.3.2)
 Recovery logs validation errors and TX/response length. `recovery_raw_log` enables full local RX hex; disable after diagnosis and redact meter ID/data before sharing. `allow_recovery_interface_reset` defaults to false. Enable only on a verified single-meter bus after explicit approval: when a checksum-valid frame with matching address and meter ID contains all 24 history records, recovery may send the existing CI=50 normal interface selection command, wait for ACK and verify a fresh normal frame. No clock write or history collection. Guard remains on failure.
+
+## Timing and upgrade checks (2.4 development)
+
+The application uses one monotonic bus-wide transmission gate with at least 61 seconds between attempted sends. Standalone diagnostics must not share the app's serial device. Ordinary polling skips missed slots; manual jobs do not have an hourly exclusion window. Clock writes target the first second of an eligible minute; readback verifies only the meter's minute-resolution time. Automatic calendar jobs start after a valid poll in the configured hour, not necessarily at its beginning. With multiple meters, rotation increases effective per-meter intervals; a full address scan can take several hours. Multi-meter operation has not been physically verified. Preserve app data and options before updating; test ordinary polling, then manual history, then manual clock, then opt-in automation separately. Roll back to v2.3.4 if necessary, preserving the normal-frame recovery marker.

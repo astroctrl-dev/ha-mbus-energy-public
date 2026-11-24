@@ -4,6 +4,7 @@
 Requires pyserial. No address scanning or write/configuration commands.
 Only sends REQ_UD2 to a single explicitly supplied primary address.
 """
+from bus_timing import write_frame
 import argparse
 import json
 from datetime import datetime, timezone
@@ -54,7 +55,7 @@ def read_one(port, baud, address, timeout, first_byte_timeout=None):
     with serial.Serial(port, baudrate=baud, bytesize=8, parity="E", stopbits=1,
                        timeout=timeout, write_timeout=timeout) as ser:
         ser.reset_input_buffer()
-        ser.write(tx)
+        write_frame(ser, tx)
         ser.flush()
         if first_byte_timeout is not None:
             ser.timeout = first_byte_timeout
