@@ -20,6 +20,8 @@ class FakeClient:
             rc = 0
             def wait_for_publish(self, timeout=None):
                 pass
+            def is_published(self):
+                return True
         return Result()
 
 
@@ -180,6 +182,34 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(checked, [["00000000"]])
         self.assertTrue(any(topic.endswith("/availability") and payload == "online"
                             for topic, payload, _, _ in client.messages))
+
+    def test_slow_history_discovery_does_not_block_polling(self):
+        started = threading.Event()
+        release = threading.Event()
+        valid_round = threading.Event()
+
+        class StopAfterOne:
+            calls = 0
+            def is_set(self):
+                return self.calls > 0
+            def wait(self, _seconds):
+                self.calls += 1
+
+        def slow_discovery(_client, _meter_id):
+            started.set()
+            release.wait(timeout=3)
+
+        try:
+            with patch("mbus_service.STOP", StopAfterOne()), \
+                 patch("mbus_service.read_one", return_value=(b"", b"frame")), \
+                 patch("mbus_service.validate", return_value=self.decoded), \
+                 patch("mbus_service.publish_history_discovery", side_effect=slow_discovery):
+                run({"meter_id": "00000000", "address": 0, "interval_seconds": 120},
+                    FakeClient(), on_valid_round=lambda ids: valid_round.set())
+            self.assertTrue(started.wait(timeout=1), "background discovery not scheduled")
+            self.assertTrue(valid_round.is_set(), "polling waited for discovery worker")
+        finally:
+            release.set()
 
     def test_two_selected_meters_poll_sequentially_with_distinct_topics(self):
         with tempfile.TemporaryDirectory() as directory:
