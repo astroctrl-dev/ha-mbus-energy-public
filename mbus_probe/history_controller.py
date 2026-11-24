@@ -79,9 +79,17 @@ class HistoryController:
         if decoded.get("address") != address:
             raise ValueError("normal frame address mismatch")
         values = select_measurements(decoded, meter_id)
-        missing = REQUIRED_SENSORS - values.keys()
+        # Identify the ordinary frame by its record layout, not by whether
+        # every individual measurement has a usable value. Historical frames
+        # must not clear the guard even if they contain some current values.
+        present = {r.get("kind") for r in decoded.get("records", ())
+                   if r.get("current_record")}
+        missing = REQUIRED_SENSORS - present
         if missing:
-            raise ValueError("normal frame missing required measurements: " + ", ".join(sorted(missing)))
+            raise ValueError("normal frame missing record types: " + ", ".join(sorted(missing)))
+        if REQUIRED_SENSORS - values.keys():
+            LOG.warning("Normal frame verified with unavailable measurements: %s",
+                        ", ".join(sorted(REQUIRED_SENSORS - values.keys())))
 
     def recover_normal(self, reader=read_one):
         """Read first; optional interface restore only after confirmed frame-3 identity."""
