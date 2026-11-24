@@ -91,9 +91,10 @@ class HistoryControllerTests(unittest.TestCase):
         self.assertTrue(controller.blocked.is_set())
         from ha_measurements import REQUIRED_SENSORS
         with patch.object(self.stop, "wait", return_value=False), \
-                patch("history_controller.validate", return_value={"address": 0}), \
+                patch("history_controller.validate", return_value={"address": 0, "records": [
+                    {"kind": k, "current_record": True} for k in REQUIRED_SENSORS]}), \
                 patch("history_controller.select_measurements",
-                      return_value={k: 1 for k in REQUIRED_SENSORS}):
+                      return_value={k: 1 for k in REQUIRED_SENSORS if k != "temperature_difference"}):
             self.assertTrue(controller.recover_normal(lambda *a, **k: (b"", b"")))
         self.assertFalse(controller.marker.exists())
         self.assertFalse(controller.blocked.is_set())
@@ -118,7 +119,8 @@ class HistoryControllerTests(unittest.TestCase):
             self.assertTrue(controller.marker.exists())
         self.config["allow_recovery_interface_reset"] = True
         with patch.object(self.stop, "wait", return_value=False), \
-                patch("history_controller.validate", return_value=historical), \
+                patch("history_controller.validate", side_effect=[historical, {"address": 0, "records": [
+                    {"kind": k, "current_record": True} for k in REQUIRED_SENSORS]}]), \
                 patch("history_controller.extract_months", return_value=months()), \
                 patch("history_controller.select_measurements",
                       side_effect=[ValueError("not normal"), {k: 1 for k in REQUIRED_SENSORS}]), \

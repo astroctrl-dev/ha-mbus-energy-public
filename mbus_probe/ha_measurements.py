@@ -64,7 +64,7 @@ def select_measurements(decoded, expected_id):
             continue
         if (record.get("unit") != unit or type(value) not in (int, float)
                 or not float("-inf") < value < float("inf")
-                or (value < 0 and kind != "power")):
+                or (value < 0 and kind not in ("power", "temperature_difference"))):
             invalid.add(kind)
             continue
         selected[kind] = value

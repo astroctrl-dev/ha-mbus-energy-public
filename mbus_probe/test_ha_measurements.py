@@ -55,6 +55,18 @@ class SelectionTests(unittest.TestCase):
         self.assertEqual(values["power"], -0.2)
         self.assertEqual(values["energy"], 12345.0)
 
+    def test_temperature_difference_is_signed_and_finite(self):
+        for value in (-100.0, -13.5, -0.1, 0.0, 0.1, 13.5, 100.0, float("nan"), float("inf"), float("-inf")):
+            with self.subTest(value=value):
+                records = [{**r, "value": value} if r.get("kind") == "temperature_difference"
+                           and r.get("current_record") else r for r in self.decoded["records"]]
+                selected = select_measurements({**self.decoded, "records": records}, "00000000")
+                if abs(value) <= 100:
+                    self.assertEqual(selected["temperature_difference"], value)
+                else:
+                    self.assertNotIn("temperature_difference", selected)
+                self.assertEqual(selected["energy"], 12345.0)
+
     def test_missing_hours_are_error_duration_not_operating_time(self):
         missing = [r for r in self.decoded["records"] if r.get("kind") == "missing_time"]
         self.assertEqual(len(missing), 2)  # Current error duration and last year's value.
