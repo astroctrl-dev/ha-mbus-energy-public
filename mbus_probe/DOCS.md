@@ -1,39 +1,49 @@
-# M-Bus T230 energimåling
+# M-Bus T230 energy metering
 
-Appen leser Landis+Gyr T230 via kablet M-Bus og publiserer gyldige aktuelle poster med MQTT Discovery. [Full installasjonsveiledning](https://github.com/astroctrl-dev/ha-mbus-energy-public/blob/main/INSTALLASJON.md) dekker kobling, oppdatering, kontroll og tilbakeføring.
+The app reads Landis+Gyr T230 over wired M-Bus and publishes valid current records via MQTT Discovery. See the [installation guide](https://github.com/astroctrl-dev/ha-mbus-energy-public/blob/main/INSTALLASJON.md) for wiring, updating, verification and rollback.
 
-## Innstillinger
+## Important upgrade – v2.4.0
 
-| Felt | Beskrivelse |
+**All users of earlier versions are advised to upgrade to v2.4.0.**
+
+Earlier versions did not fully coordinate the timing of regular polling, monthly history retrieval and clock synchronization. Under certain conditions, requests could occur too close together for the meter's communication timing requirements, potentially causing interrupted or missing readings.
+
+Version 2.4.0 uses a shared transmission gate for all application M-Bus requests, enforcing at least 61 seconds after each transmission attempt, including failed attempts. Regular polling skips slots that cannot meet the timing constraints. This improves communication predictability and reliability.
+
+Back up app data and configuration before upgrading and verify regular polling afterwards.
+
+## Configuration
+
+| Field | Description |
 | --- | --- |
-| `serial_port` | Serieenheten som faktisk er tilgjengelig i Home Assistant OS. |
-| `baud` | Hastigheten dokumentert for måleren. |
-| `interval_seconds` | Normal lesing: 90, 120, 300 eller 600 sekunder; standard 120. Ved 120 s leses normalt på oddetallsminutter (:01, :03 … :59). |
-| `read_before_full_hour` | Valgfri forskyvning av hele den faste avlesningsserien, ikke ekstra lesing. |
-| `seconds_before_full_hour` | Forskyvning 0–300 sekunder. |
-| `allow_clock_sync` | Tillater bekreftet manuell synk til HA-tid med verifisert tilbakelesning. Av som standard. |
-| `auto_clock_sync` | Valgfri sjekk ved oppstart og i timen fra kl. 23 lokal tid etter gyldig avlesning. Skriver bare etter tidligere verifisert manuell synk og ved avgrenset tidsavvik. |
-| `clock_timezone` | Målerens lokale tidssone, standard `Europe/Oslo`; kontroller før synk. |
-| `allow_monthly_history` | Aktiverer separat historikkhandling i webgrensesnittet. |
-| `auto_monthly_history` | Av som standard. Ved oppstart og 1. og 2. i måneden fra kl. 01 lokal tid etter gyldig avlesning. Krever allow_monthly_history. |
-| `mqtt_host` og `mqtt_port` | Broker, normalt `core-mosquitto:1883`. |
-| `mqtt_username` og `mqtt_password` | Legges inn lokalt og må ikke deles. |
+| `serial_port` | Serial device available in Home Assistant OS. |
+| `baud` | Baud rate documented for the meter. |
+| `interval_seconds` | Regular polling: 90, 120, 300 or 600 seconds; default 120. At 120 seconds, readings normally occur on odd minutes (:01, :03 … :59). |
+| `read_before_full_hour` | Optional shift of the entire fixed polling schedule, not an extra reading. |
+| `seconds_before_full_hour` | Offset of 0–300 seconds. |
+| `allow_clock_sync` | Enables confirmed manual synchronization to HA time with verified readback. Off by default. |
+| `auto_clock_sync` | Optional check at startup and during the 23:00 local hour after a valid reading. Writes only after verified manual synchronization and within bounded clock deviation. |
+| `clock_timezone` | Meter local time zone; default `Europe/Oslo`. Verify before synchronization. |
+| `allow_monthly_history` | Enables the separate history action in the web UI. |
+| `auto_monthly_history` | Off by default. Runs at startup and during the 01:00 local hour on the first and second of each month after a valid reading. Requires allow_monthly_history. |
+| `mqtt_host` and `mqtt_port` | Broker, normally `core-mosquitto:1883`. |
+| `mqtt_username` and `mqtt_password` | Enter locally; do not share. |
 
-Trykk **Save** etter endring og **Restart** appen. Bruk **Open Web UI** til å søke etter og velge målere. Funn viser ID og primæradresse sammen. Hver valgt måler vises under **Settings → Devices & services → MQTT**.
+Save and restart after changes. Use **Open Web UI** to discover and select meters. Results show meter ID and primary address. Each selected meter appears under **Settings → Devices & services → MQTT**. The current app UI may display Norwegian labels.
 
-## Aktuelle verdier
+## Current measurements
 
-Appen viderefører energi, volum, effekt, volumstrøm, turtemperatur, returtemperatur og temperaturdifferanse, samt status og datakvalitet. Den viser målerens lokale dato/tid som tekst, sommertidsflagget separat, og UTC-tidspunktet for siste vellykkede avlesning. Målerens tid har ingen kodet tidssone og konverteres ikke automatisk. En ugyldig målepost gir `unknown` for den aktuelle sensoren uten å avvise andre gyldige verdier. Negativ effekt støttes. Gyldige timetellere for driftstid, vannstrømstid og tid uten måling vises separat; de er akkumulerte timer.
+Energy, volume, power, flow, flow and return temperatures, temperature difference, status and data quality are preserved. Meter local date/time is shown as text, with the daylight-saving flag separately and the last successful reading timestamp in UTC. The meter time has no encoded time zone and is not automatically converted. An invalid record makes only the corresponding sensor unknown. Signed power is supported. Valid operating-time, flow-time and non-measuring-time counters are cumulative hours.
 
-## Historikk og eksport
+## History and export
 
-Når `allow_monthly_history` er aktivert, pauser **Hent månedshistorikk** ordinær polling, velger historisk ramme, leser 24 akkumulerte kWh-stander og gjenoppretter og verifiserer normalrammen. Operasjonen tar flere minutter; ved mislykket kontroll forblir normal polling blokkert. Komplett historikk vises som 24 stander og 23 differanser i webgrensesnittet og arkene **Månedshistorikk** og **Månedsforbruk** i Excel-filen. Ved verifisert målerklokke kan første dag i hver måned vises som **beregnet** dato etter 15 minutter inn i ny måned. Historikkrammen har ikke levert en faktisk avregningsdato, og beregnet dato er tydelig merket. MQTT viser 24 historiske målerstander og 23 differanser som diagnostikk etter manuell innhenting; nye installasjoner får tosifrede posisjoner i foreslåtte navn og entitets-ID-er. Historikken mates ikke som dagens forbruk til HA Energy.
+With `allow_monthly_history` enabled, the history action (**Hent månedshistorikk**) pauses regular polling, selects the history frame, reads 24 cumulative kWh readings and restores and verifies the normal frame. This takes several minutes; failed verification blocks regular polling. Complete history comprises 24 readings and 23 differences in the UI and Excel worksheets **Månedshistorikk** and **Månedsforbruk**. With a verified meter clock, the first day of each month can be shown as an estimated date after the first 15 minutes of a new month. The history frame has not supplied actual billing dates. MQTT exposes 24 historical readings and 23 differences as diagnostics after manual retrieval; new installations use two-digit positions in suggested names and IDs. History is not added as current HA Energy consumption.
 
-**Last ned analyse (.xlsx)** eksporterer bare lokalt lagrede, validerte data; nedlasting leser ikke måleren. Alias skjuler måler-ID og råtelegram utelates. Måleverdiene er reelle og bør kontrolleres før deling.
+The analysis download (**Last ned analyse (.xlsx)**) exports locally stored validated data without querying the meter. An alias replaces the meter ID, and raw telegrams are excluded. Review actual measurement data before sharing.
 
 ### Recovery (2.3.2)
 Recovery logs validation errors and TX/response length. `recovery_raw_log` enables full local RX hex; disable after diagnosis and redact meter ID/data before sharing. `allow_recovery_interface_reset` defaults to false. Enable only on a verified single-meter bus after explicit approval: when a checksum-valid frame with matching address and meter ID contains all 24 history records, recovery may send the existing CI=50 normal interface selection command, wait for ACK and verify a fresh normal frame. No clock write or history collection. Guard remains on failure.
 
-## Timing and upgrade checks (2.4 development)
+## Timing and upgrade checks (2.4.0)
 
 The application uses one monotonic bus-wide transmission gate with at least 61 seconds between attempted sends. Standalone diagnostics must not share the app's serial device. Ordinary polling skips missed slots; manual jobs do not have an hourly exclusion window. Clock writes target the first second of an eligible minute; readback verifies only the meter's minute-resolution time. Automatic calendar jobs start after a valid poll in the configured hour, not necessarily at its beginning. With multiple meters, rotation increases effective per-meter intervals; a full address scan can take several hours. Multi-meter operation has not been physically verified. Preserve app data and options before updating; test ordinary polling, then manual history, then manual clock, then opt-in automation separately. Roll back to v2.3.4 if necessary, preserving the normal-frame recovery marker.
