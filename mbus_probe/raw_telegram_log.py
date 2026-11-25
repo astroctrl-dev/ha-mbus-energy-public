@@ -29,7 +29,7 @@ def install(logger):
     global _active
     _active = logger
 
-def capture(direction, frame, status):
+def capture(direction, frame, status=None):
     """Called only after actual I/O; no disk I/O in the bus thread."""
     try:
         logger = _active
@@ -37,6 +37,8 @@ def capture(direction, frame, status):
             return
         if direction == "TX":
             _context.transaction = uuid.uuid4().hex
+        if status is None:
+            status = classify(frame)
         logger.offer({"timestamp_utc": datetime.now(timezone.utc).isoformat(),
                       "transaction_id": getattr(_context, "transaction", None),
                       "operation": getattr(_context, "operation", None) or "read",
@@ -67,7 +69,7 @@ def receive(fn):
             capture("RX", b"", "read_error")
             raise
         frame = result[1] if isinstance(result, tuple) else result
-        capture("RX", frame, classify(frame))
+        capture("RX", frame)
         return result
     return wrapped
 
@@ -138,6 +140,6 @@ class RawLog:
             return b"".join(chunks)
 
     def status(self):
-        return {"enabled": self.enabled, "queued": self.pending.qsize(),
+        return {"enabled": self.enabled, "queued": self.pending.unfinished_tasks,
                 "dropped": self.dropped, "rotations": self.rotations,
                 "storage_error": self.error}

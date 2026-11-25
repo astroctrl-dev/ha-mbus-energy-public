@@ -1,6 +1,6 @@
-# Public beta: v2.6.0-beta.1
+# Public beta: v2.6.0-beta.2
 
-The ordinary App Store channel currently offers an opt-in raw diagnostics beta. Back up before updating. Stable v2.5.0 remains the latest stable release. [Beta notes](RELEASE-2.6.0-beta.1.md).
+The ordinary App Store channel currently offers an opt-in raw diagnostics beta. Back up before updating. Stable v2.5.0 remains the latest stable release. [Beta notes](RELEASE-2.6.0-beta.2.md).
 
 # Latest stable release: v2.5.0
 

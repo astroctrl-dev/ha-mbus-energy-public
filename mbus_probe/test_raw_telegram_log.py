@@ -52,3 +52,40 @@ class RawLogTests(unittest.TestCase):
             log.pending.join()
             self.assertTrue(log.error)
             self.assertEqual(log.dropped,1)
+
+    def test_disabled_does_not_classify_or_enqueue(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmp:
+            log = RawLog(tmp)
+            install(log)
+            try:
+                @receive
+                def response():
+                    return b"\xe5"
+                with patch("raw_telegram_log.classify", side_effect=AssertionError("disabled")) as classify_mock:
+                    self.assertEqual(response(), b"\xe5")
+                    classify_mock.assert_not_called()
+                self.assertEqual(log.pending.unfinished_tasks, 0)
+            finally:
+                install(None)
+
+    def test_export_pending_includes_inflight_disk_write(self):
+        import threading
+        with tempfile.TemporaryDirectory() as tmp:
+            log = RawLog(tmp)
+            entered, release = threading.Event(), threading.Event()
+            append = log._append
+            def delayed(event):
+                entered.set()
+                release.wait(5)
+                append(event)
+            log._append = delayed
+            log.set_enabled(True)
+            log.offer({"hex": "ab"})
+            try:
+                self.assertTrue(entered.wait(2))
+                self.assertEqual(log.status()["queued"], 1)
+            finally:
+                release.set()
+                log.pending.join()
+            self.assertEqual(log.status()["queued"], 0)

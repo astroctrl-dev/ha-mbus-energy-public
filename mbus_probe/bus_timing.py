@@ -46,39 +46,43 @@ class BusTiming:
         return self.monotonic() >= self.eligible
 
     def write(self, serial, frame):
-        with self.lock:
-            target = getattr(_slot, 'target', None)
-            if target is not None and (not self.ready() or not 0 <= self.wall() - target <= 1):
-                raise MissedSlot('bus not eligible at planned slot')
-            while self.monotonic() < self.eligible:
-                self.sleep(self.eligible - self.monotonic())
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            temp = self.path.with_suffix(".tmp")
-            try:
-                with temp.open("w", encoding="ascii") as out:
-                    out.write(str(self.wall()) + "\n")
-                    out.flush()
-                    os.fsync(out.fileno())
-                os.chmod(temp, 0o600)
-                os.replace(temp, self.path)
-            finally:
-                temp.unlink(missing_ok=True)
-            # Count failed/partial sends too. Set the next eligible instant
-            # after write returns, conservatively including transmission time.
-            if callable(frame):
-                frame = frame()
-            LOG.info("M-Bus TX ready: %d bytes", len(frame))
-            if target is not None and not 0 <= self.wall() - target <= 1:
-                raise MissedSlot('serial preparation exceeded planned slot')
-            try:
-                written = serial.write(frame)
-                capture("TX", frame, "sent" if written == len(frame) else "partial_write")
-                return written
-            except Exception:
-                capture("TX", frame, "write_error")
-                raise
-            finally:
-                self.eligible = self.monotonic() + MIN_INTERVAL
+        attempted = False
+        written = None
+        try:
+            with self.lock:
+                target = getattr(_slot, 'target', None)
+                if target is not None and (not self.ready() or not 0 <= self.wall() - target <= 1):
+                    raise MissedSlot('bus not eligible at planned slot')
+                while self.monotonic() < self.eligible:
+                    self.sleep(self.eligible - self.monotonic())
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+                temp = self.path.with_suffix(".tmp")
+                try:
+                    with temp.open("w", encoding="ascii") as out:
+                        out.write(str(self.wall()) + "\n")
+                        out.flush()
+                        os.fsync(out.fileno())
+                    os.chmod(temp, 0o600)
+                    os.replace(temp, self.path)
+                finally:
+                    temp.unlink(missing_ok=True)
+                # Count failed/partial sends too. Set the next eligible instant
+                # after write returns, conservatively including transmission time.
+                if callable(frame):
+                    frame = frame()
+                LOG.info("M-Bus TX ready: %d bytes", len(frame))
+                if target is not None and not 0 <= self.wall() - target <= 1:
+                    raise MissedSlot('serial preparation exceeded planned slot')
+                attempted = True
+                try:
+                    written = serial.write(frame)
+                    return written
+                finally:
+                    self.eligible = self.monotonic() + MIN_INTERVAL
+        finally:
+            if attempted:
+                capture("TX", frame, "write_error" if written is None else
+                        "sent" if written == len(frame) else "partial_write")
 
 
 def shared_timing_active():

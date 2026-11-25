@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.6.0-beta.2
+
+- Skip raw frame classification when capture is disabled. TX capture occurs after the timing gate updates eligibility and releases its lock. Pending count includes in-flight disk writes. No new meter operations.
+
 ## 2.6.0-beta.1
 
 - Opt-in local raw transport evidence for investigation of historical dates. No additional bus commands. Capture defaults off on every restart; saved log remains downloadable. Two rotating 5 MiB files, bounded asynchronous queue. Raw JSONL is separate from existing anonymized Excel export. Physical validation pending; exact historical dates not yet implemented.

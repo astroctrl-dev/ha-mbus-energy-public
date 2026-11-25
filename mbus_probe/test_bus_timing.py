@@ -100,3 +100,25 @@ class TimingTests(unittest.TestCase):
                 self.assertEqual(stamps, [61., 122., 183.])
             finally:
                 install_bus_timing(None)
+
+    def test_capture_runs_after_gate_release_and_eligibility_update(self):
+        from unittest.mock import patch
+        now = [0.]
+        seen = []
+        class Serial:
+            def write(self, frame):
+                if frame == b"fail":
+                    raise OSError("test")
+                return len(frame)
+        with tempfile.TemporaryDirectory() as root:
+            gate = BusTiming(Path(root) / "last", lambda: now[0],
+                             lambda: 1000 + now[0],
+                             lambda delay: now.__setitem__(0, now[0] + delay))
+            def capture(direction, frame, status):
+                seen.append((gate.lock.locked(), gate.eligible, now[0], status))
+            with patch("bus_timing.capture", capture):
+                self.assertEqual(gate.write(Serial(), b"ok"), 2)
+                with self.assertRaises(OSError):
+                    gate.write(Serial(), b"fail")
+            self.assertEqual(seen, [(False, 122., 61., "sent"),
+                                    (False, 183., 122., "write_error")])
