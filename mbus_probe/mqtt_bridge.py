@@ -237,27 +237,10 @@ def publish_history(client, meter_id, snapshot):
         if type(value) not in (int, float) or value < 0:
             raise ValueError("invalid historical period")
         period = by_period[index]
-        attributes = {"history_captured_at_utc": capture,
-                      "meter_date_status": period.get("date_source", "unverified"),
-                      "newer_archive_position": index,
-                      "older_archive_position": index + 1,
-                      "rollover_evidence": snapshot.get("rollover_evidence", "not_observed")}
-        attributes["meter_storage_date"] = period.get("meter_end_date") or period.get("estimated_end_date")
-        attributes["meter_storage_start_date"] = period.get("meter_start_date") or period.get("estimated_start_date")
-        attributes["meter_storage_end_date"] = attributes["meter_storage_date"]
-        attributes["estimated_date"] = period.get("estimated_date", period.get("estimated_end_date"))
-        for field in ("read_at_utc", "newer_read_at_utc", "older_read_at_utc"):
-            attributes[field] = period.get(field, snapshot.get("date_provenance", {}).get("history_read_at_utc"))
-        if period.get("date_source") in ("estimated_first_of_month", "derived_monthly_set_day"):
-            attributes["estimated_start_date"] = period["estimated_start_date"]
-            attributes["estimated_end_date"] = period["estimated_end_date"]
-            attributes["date_assumption"] = "first_of_month"
-        if period.get("date_source") == "meter_verified":
-            if period.get("meter_start_date"):
-                attributes["meter_start_date"] = period["meter_start_date"]
-            if period.get("meter_end_date"):
-                attributes["meter_end_date"] = period["meter_end_date"]
-        attributes.update(period_archive_attributes(period, by_stand[index], by_stand[index+1]))
+        attributes = period_archive_attributes(period, by_stand[index], by_stand[index+1])
+        attributes.update(newer_archive_position=index, older_archive_position=index+1)
+        if attributes["history_captured_at_utc"] is None:
+            attributes["history_captured_at_utc"] = snapshot.get("date_provenance", {}).get("history_read_at_utc") or capture
         result = client.publish(f"mbus/t230/{key}/history_period_{index}/attributes",
                                 json.dumps(attributes), qos=1, retain=False)
         if result.rc:

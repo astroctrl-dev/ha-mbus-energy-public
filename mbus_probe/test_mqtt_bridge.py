@@ -385,5 +385,21 @@ class PeriodGroupTests(unittest.TestCase):
         self.assertEqual(stand["read_at_utc"],"2026-11-25T10:00:00Z")
         self.assertNotIn("group_updated_at_utc",stand)
         self.assertEqual(period["monthly_maxima"]["power"]["value"],12)
-        self.assertEqual(period["instrument_storage_local_time"],"2026-11-01T00:00")
-        self.assertEqual(period["group_updated_at_utc"],"2026-11-26T11:00:00Z")
+        self.assertEqual(period["meter_storage_date"],"2026-11-01T00:00")
+        self.assertEqual(period["meter_date_status"],"instrument_reported")
+        self.assertEqual(period["history_captured_at_utc"],"2026-11-26T11:00:00Z")
+        self.assertEqual(set(period), {"history_captured_at_utc","meter_date_status","newer_archive_position","older_archive_position","meter_storage_date","period_m3","monthly_maxima"})
+
+    def test_shared_timestamp_only_for_same_observation(self):
+        from archive_view import period_archive_attributes
+        stamp="2026-11-25T10:00:00Z"
+        maxima={kind:{"value":1,"unit":"kW","read_at_utc":stamp}
+                for kind in ("power","flow","flow_temperature","return_temperature")}
+        row={"frame4":{"maxima":maxima}}
+        result=period_archive_attributes({},row,{})["monthly_maxima"]
+        self.assertEqual(result["read_at_utc"],stamp)
+        self.assertNotIn("read_at_utc",result["power"])
+        maxima["power"]["read_at_utc"]="2026-11-26T10:00:00Z"
+        result=period_archive_attributes({},row,{})["monthly_maxima"]
+        self.assertIsNone(result["read_at_utc"])
+        self.assertEqual(result["power"]["read_at_utc"],"2026-11-26T10:00:00Z")
