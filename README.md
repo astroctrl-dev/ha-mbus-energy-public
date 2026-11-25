@@ -1,6 +1,6 @@
 # Current app update: v2.7.4 (stable)
 
-Stable release approved after physical clock synchronization and normal polling verification. Back up before updating. Seasonal checks run on the next eligible valid polling round after the actual transition instant. Actual seasonal transition, active alarm persistence and restart of this specific beta remain unverified. Clock readings retain minute resolution. See [changelog](mbus_probe/CHANGELOG.md).
+Stable release approved after physical clock synchronization and normal polling verification. Back up before updating. Seasonal checks run on the next eligible valid polling round after the actual transition instant. Restart of v2.7.4-beta.1 and recovery of sensor values confirmed by the product lead. Actual seasonal transition and active alarm persistence remain unverified. Clock readings retain minute resolution. See [changelog](mbus_probe/CHANGELOG.md).
 
 # M-Bus T230 energy metering for Home Assistant
 
