@@ -1,6 +1,6 @@
-# Public beta: v2.5.0-beta.3
+# Latest stable release: v2.5.0
 
-The ordinary Home Assistant App Store repository offers v2.5.0-beta.3, a public prerelease. Back up the existing app and its data before updating. The independent app web interface uses English; Home Assistant configuration follows its own language. See [beta release notes](RELEASE-2.5.0-beta.3.md).
+Update through the ordinary Home Assistant App Store repository. Back up the existing app and its data before updating. The independent web interface uses English; Home Assistant configuration follows its own language. See [release notes](RELEASE-2.5.0.md).
 
 # M-Bus T230 energy metering for Home Assistant
 

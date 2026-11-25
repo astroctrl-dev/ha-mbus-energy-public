@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.5.0
+
+- Final language architecture: Home Assistant configuration translations in four languages, independent web interface and Excel Info in English.
+- Native Home Assistant temperature_delta support; no extra configuration parameters.
+- Existing sensor identifiers, decoded units, and M-Bus communication unchanged.
+- User verified regular readings, Celsius delta conversion and configuration simplification. Full independent verification and long-term statistics verification not completed.
+
 ## 2.5.0-beta.3
 
 - Independent web interface and Excel Info use English, regardless of browser preferences.
