@@ -235,3 +235,84 @@ class ArchiveControllerTests(unittest.TestCase):
             self.controller.worker.join(2)
             self.assertEqual([c.args[1] for c in read.call_args_list],list(range(1,25)))
         self.assertEqual(self.controller.snapshot()["status"],"complete")
+
+    def test_progress_idle_and_failed(self):
+        self.assertEqual(self.controller.snapshot()["archive_progress"],{})
+        from archive_acquisition import ArchiveDataError
+        def reject(*args,**kwargs):
+            state=self.controller.snapshot()
+            self.assertEqual(state["archive_progress"]["1"],"request")
+            self.assertEqual(state["archive_progress"]["2"],"waiting")
+            raise ArchiveDataError("bad")
+        with patch("history_controller.shared_timing_active",return_value=True), \
+             patch.object(self.controller,"collect_archive_dev",side_effect=reject):
+            self.controller.start_extended_archive("00000000",confirmed=True)
+            self.controller.worker.join(2)
+        self.assertEqual(self.controller.snapshot()["archive_progress"]["1"],"failed")
+        self.assertEqual(self.controller.snapshot()["archive_progress"]["2"],"waiting")
+
+    def test_registry_readable_during_transaction(self):
+        def reader(*args,**kwargs):
+            finished=threading.Event()
+            def read_registry():
+                self.controller.registry.snapshot()
+                finished.set()
+            t=threading.Thread(target=read_registry,daemon=True)
+            t.start()
+            self.assertTrue(finished.wait(1),"GUI blocked by registry lock")
+            return self.saved
+        with patch("history_controller.shared_timing_active",return_value=True):
+            self.controller.collect_archive_dev("00000000",1,approved=True,reader=reader)
+
+    def test_owned_archive_recovery_without_optional_reset(self):
+        from ha_measurements import REQUIRED_SENSORS
+        from unittest.mock import Mock
+        import json
+        c=self.controller
+        c.root.mkdir(parents=True,exist_ok=True)
+        c.marker.write_text(json.dumps({"operation":"archive_frame4","meter_id":"00000000","address":0}))
+        c.blocked.set()
+        historical={"address":0,"control":8}
+        normal={"address":0,"records":[{"kind":k,"current_record":True} for k in REQUIRED_SENSORS]}
+        with patch("history_controller.shared_timing_active",return_value=True), \
+             patch("history_controller.validate",side_effect=[historical,normal]), \
+             patch("history_controller.extract_months",side_effect=ValueError), \
+             patch("history_controller.extract_monthly_set_day",side_effect=ValueError), \
+             patch("history_controller.select_measurements",side_effect=[ValueError,{k:1 for k in REQUIRED_SENSORS}]), \
+             patch.object(c,"_confirmed_archive",return_value=True), \
+             patch.object(c,"_restore_interface") as restore:
+            self.assertTrue(c.recover_normal(Mock(return_value=(b"tx",b"rx"))))
+            restore.assert_called_once_with("/dev/unused",2400,0)
+        self.assertFalse(c.marker.exists())
+        self.assertFalse(c.blocked.is_set())
+        self.assertEqual(self.path.read_bytes(),self.original)
+
+    def test_every_start_selects_normal_even_without_marker(self):
+        from ha_measurements import REQUIRED_SENSORS
+        from unittest.mock import Mock
+        c=self.controller
+        self.assertFalse(c.marker.exists())
+        c.require_startup_normal()
+        self.assertTrue(c.blocked.is_set())
+        normal={"address":0,"records":[{"kind":k,"current_record":True} for k in REQUIRED_SENSORS]}
+        with patch("history_controller.shared_timing_active",return_value=True), \
+             patch("history_controller.validate",return_value=normal), \
+             patch("history_controller.select_measurements",return_value={k:1 for k in REQUIRED_SENSORS}), \
+             patch.object(c,"_restore_interface") as restore:
+            reader=Mock(return_value=(b"tx",b"rx"))
+            self.assertTrue(c.recover_normal(reader))
+            restore.assert_called_once_with("/dev/unused",2400,0)
+            reader.assert_called_once()
+        self.assertFalse(c.blocked.is_set())
+        self.assertEqual(self.path.read_bytes(),self.original)
+
+    def test_startup_failure_preserves_guard(self):
+        c=self.controller
+        c.require_startup_normal()
+        with patch("history_controller.shared_timing_active",return_value=True), \
+             patch.object(c,"_restore_interface",side_effect=ValueError("no ACK")):
+            self.assertFalse(c.recover_normal(lambda *a,**k:self.fail("unexpected read")))
+        self.assertTrue(c.blocked.is_set())
+        self.assertTrue(c.startup_pending)
+        self.assertTrue(c.marker.exists())
+        self.assertEqual(self.path.read_bytes(),self.original)

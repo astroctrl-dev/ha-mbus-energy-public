@@ -21,13 +21,15 @@ PAGE = r"""<!doctype html><html lang="no"><meta charset="utf-8"><meta name="view
 <style>html,body{margin:0;min-height:100%;background:#f7f9fb;color:#17212b;font:16px/1.5 system-ui,-apple-system,sans-serif}main{max-width:720px;margin:0 auto;padding:20px 16px 40px}h1{font-size:1.5rem;line-height:1.2;margin:0 0 8px}h2{font-size:1.15rem;margin:24px 0 8px}p{margin:8px 0}button{min-height:44px;max-width:100%;border:1px solid #8a9aaa;border-radius:8px;background:#e8f1fa;color:#152b3e;padding:8px 14px;font:inherit;margin:4px 4px 4px 0}button:disabled{opacity:.55}button:focus-visible{outline:3px solid #1266ab}.table-wrap{overflow-x:auto;background:#fff;border:1px solid #d0d9e1;border-radius:8px}table{border-collapse:collapse;width:100%;font:inherit}th,td{text-align:left;padding:8px;border-bottom:1px solid #d0d9e1;white-space:nowrap}#status{background:#fff;border:1px solid #d0d9e1;border-radius:8px;padding:12px}.meter{background:#fff;border:1px solid #d0d9e1;border-radius:8px;padding:12px;margin:8px 0;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;overflow-wrap:anywhere}#error{color:#a12020;overflow-wrap:anywhere}</style><main><h1>M-Bus målere</h1><p>Søk leser primæradressene 0–250. Målere med delt adresse kan ikke alltid skilles.</p>
 <button id="scan">Søk etter målere</button><button id="auto">Velg eneste ledige automatisk</button>
 <h2>Klokke</h2><p>Synkronisering bruker systemtid og valgt tidssone i Configuration. Manuell synkronisering krever bekreftelse; automatisk kontroll starter etter første gyldige måling ved oppstart eller nytt målervalg.</p><p id="clock-status"></p><h2>Analyse</h2><p>Last ned validerte normalavlesninger og lagret månedshistorikk som Excel-fil. Nedlasting leser lagrede data og sender ingen kommando til måleren. Historikk hentes separat med knappen ved den valgte måleren.</p><p>Measurement data logging is controlled separately in Configuration. Disabling capture keeps existing files and history.</p><button id="export">Last ned analyse (.xlsx)</button>
-<h2>Raw telegram diagnostics</h2><p>Local capture may contain meter identifiers and consumption. Enable raw capture in Configuration; restart the app to apply. No extra bus requests.</p><p id="raw-status"></p><button id="raw-download">Download raw text (.txt)</button><p id="status"></p><h2>Lagret månedshistorikk</h2><p>First installation: leave all optional switches off and verify ordinary live measurements before enabling additional functions. History retrieval reads frames 2 and 3 and restores the normal frame; allow about six minutes per meter (six requests, at least 61 seconds apart). Regular polling pauses; live values may be stale or temporarily unavailable. Clock synchronization and scanning also respect the interval. Downloads use saved data and do not query the meter.</p><p>Posisjonene angir rekkefølge i målerens historikk. Dates derived from the current monthly set day and meter clock are estimates, not individual storage timestamps. Older dates assume the setting has not changed.</p><div id="history"></div><h2>Tilgjengelige målere</h2><div id="available"></div>
+<h2>Raw telegram diagnostics</h2><p>Local capture may contain meter identifiers and consumption. Enable raw capture in Configuration; restart the app to apply. No extra bus requests.</p><p id="raw-status"></p><button id="raw-download">Download raw text (.txt)</button><p id="status"></p><h2>Lagret månedshistorikk</h2><p>First installation: leave all optional switches off and verify ordinary live measurements before enabling additional functions. Initial retrieval reads frames 2 and 3. Subsequent manual retrieval reads missing extended months (frame 4); allow about four minutes per month. The table shows progress for the current job. Regular polling pauses; live values may be stale or temporarily unavailable. Clock synchronization and scanning also respect the interval. Downloads use saved data and do not query the meter.</p><p>Positions indicate the order in the meter archive. A dash means no retrieval has been started in this session. Saved energy values remain visible while extended data is being read.</p><div id="history"></div><h2>Tilgjengelige målere</h2><div id="available"></div>
 <h2>Etablerte målere</h2><div id="selected"></div><p id="error" role="alert"></p>
 </main><script>
 const root = location.pathname.replace(/\/$/, '');
 let refreshing = false;
 let lastLists = '';
 let lastHistoryCapture = null;
+let lastArchiveRevision = -1;
+let historySubmitting = false;
 function addCell(row, value, heading=false) {
   const cell = document.createElement(heading ? 'th' : 'td');
   cell.textContent = String(value ?? '');
@@ -57,15 +59,22 @@ async function refreshHistory() {
     }
     const wrap = document.createElement('div'); wrap.className = 'table-wrap';
     const table = document.createElement('table'); const head = document.createElement('tr');
-    for (const label of ['Posisjon', 'Målerstand (kWh)', 'Forbruk siden neste eldre stand (kWh)', 'Avregningsdato']) addCell(head, label, true);
+    for (const label of ['Posisjon', 'Målerstand (kWh)', 'Forbruk siden neste eldre stand (kWh)', 'Status']) addCell(head, label, true);
     table.append(head);
     const periods = new Map(entry.snapshot.bounded_periods.map(p => [p.newer_storage, p.period_kwh]));
+    const progress = data.archive_alias === entry.alias ? data.archive_progress : {};
+    const statusLabels = {waiting:'Waiting',request:'Request',completed:'Completed',stored:'Already stored',failed:'Failed'};
+    const statusColors = {waiting:'#777',request:'#a66b00',completed:'#17803d',stored:'#17803d',failed:'#b91c1c'};
     for (const stand of entry.snapshot.stands) {
       const row = document.createElement('tr');
       addCell(row, '−' + String(stand.month_back).padStart(2, '0'));
       addCell(row, stand.cumulative_kwh);
       addCell(row, periods.get(stand.storage) ?? '—');
-      addCell(row, stand.meter_date ?? (stand.estimated_date ? stand.estimated_date + ' (beregnet)' : 'Ikke tilgjengelig'));
+      const status = progress[String(stand.month_back)];
+      const cell = document.createElement('td');
+      cell.textContent = statusLabels[status] ? '● ' + statusLabels[status] : '—';
+      if (statusColors[status]) { cell.style.color=statusColors[status]; cell.style.fontWeight='600'; }
+      row.append(cell);
       table.append(row);
     }
     wrap.append(table); area.append(wrap);
@@ -99,13 +108,16 @@ async function refresh() {
       `Klokke: ${localText(state.clock.status)}. Systemtid nå: ${state.clock_target}. ` +
       (state.clock.result ? `Før: ${state.clock.result.before || '—'}, mål: ${state.clock.result.target || 'ingen endring'}, etter: ${state.clock.result.after || '—'}. ` : '') +
       (state.clock.result && state.clock.result.dst_test ? `DST 1: ${state.clock.result.dst_test_results?.["1"] === true ? "PASS" : state.clock.result.dst_test_results?.["1"] === false ? "FAIL" : "NOT TESTED"}; DST 0: ${state.clock.result.dst_test_results?.["0"] === true ? "PASS" : state.clock.result.dst_test_results?.["0"] === false ? "FAIL" : "NOT TESTED"}; restored: ${state.clock.result.clock_restored ? "PASS" : "FAIL"}. ` : '') + (localText(state.clock.error) || '');
-    if (state.history.status === 'complete' && state.history.captured_at_utc !== lastHistoryCapture) {
-      lastHistoryCapture = state.history.captured_at_utc;
+    if (state.history.archive_revision !== lastArchiveRevision ||
+        (state.history.status === 'complete' && state.history.captured_at_utc !== lastHistoryCapture)) {
       await refreshHistory();
+      lastHistoryCapture = state.history.captured_at_utc;
+      lastArchiveRevision = state.history.archive_revision;
     }
-    document.getElementById('scan').disabled = state.scan_status === 'running';
-    document.getElementById('auto').disabled = state.scan_status !== 'completed' || state.scan_errors.length > 0 || state.available.filter(m => m.supported).length !== 1;
-    const lists = JSON.stringify([state.available, state.selected, state.history_enabled, state.history.status, state.clock_enabled, state.auto_clock_sync, state.clock.status, state.clock_target, state.migrations, state.dst_diagnostics]);
+    const busy = historySubmitting || state.history.status === 'running' || state.clock.status === 'running' || state.scan_status === 'running';
+    document.getElementById('scan').disabled = busy;
+    document.getElementById('auto').disabled = busy || state.scan_status !== 'completed' || state.scan_errors.length > 0 || state.available.filter(m => m.supported).length !== 1;
+    const lists = JSON.stringify([busy, state.available, state.selected, state.history_enabled, state.history.status, state.clock_enabled, state.auto_clock_sync, state.clock.status, state.clock_target, state.migrations, state.dst_diagnostics]);
     if (lists !== lastLists) {
       lastLists = lists;
     for (const name of ['available', 'selected']) {
@@ -121,20 +133,24 @@ async function refresh() {
           diagnostic.textContent = localText('DST_TRANSITION_FAILED') + ': ' + flag(dstState.dst_transition_failed) +
             '; ' + localText('DST_CLOCK_OVERRIDE') + ': ' + flag(dstState.dst_clock_override);
           line.append(diagnostic);
-          line.append(button('Fjern', () => act('/api/remove', item.meter_id)));
+          const remove = button('Fjern', () => act('/api/remove', item.meter_id)); remove.disabled = busy; line.append(remove);
           const hist = button('Hent månedshistorikk', async () => {
             if (!confirm('Read monthly archive? Existing energy history is preserved. Missing extended months are read individually; a full archive can require over 90 minutes. Normal polling may pause. Continue?')) return;
-            try { await call('/api/history', {meter_id:item.meter_id, confirm:true}); await refresh(); }
+            if (historySubmitting || hist.disabled) return;
+            historySubmitting = true;
+            hist.disabled = true;
+            try { await call('/api/history', {meter_id:item.meter_id, confirm:true}); document.getElementById('error').textContent=''; }
             catch (e) { document.getElementById('error').textContent=e.message; }
+            finally { historySubmitting=false; lastLists=''; await refresh(); }
           });
           const migration = state.migrations[item.meter_id];
-          hist.disabled = !state.history_enabled || state.history.status === 'running' || migration === "pending" || migration === "invalid";
+          hist.disabled = busy || !state.history_enabled || state.history.status === 'restore_unverified' || migration === "pending" || migration === "invalid";
           if (migration === "pending" || migration === "complete") {
             const migrate = button(migration === "complete" ? "Migration completed (24/24 + 23/23)" : "Migrate historical data", async () => {
               await act("/api/migrate", item.meter_id);
               await refreshHistory();
             });
-            migrate.disabled = migration === "complete" || state.history.status === "running";
+            migrate.disabled = busy || migration === "complete";
             line.append(migrate);
           }
           line.append(hist);
@@ -143,10 +159,10 @@ async function refresh() {
             try { await call('/api/clock', {meter_id:item.meter_id, confirm:true}); document.getElementById('error').textContent=''; await refresh(); }
             catch (e) { document.getElementById('error').textContent=e.message; }
           });
-          clock.disabled = !state.clock_enabled || state.clock.status === 'running' || state.history.status === 'running';
+          clock.disabled = busy || !state.clock_enabled || state.history.status === 'restore_unverified';
           line.append(clock);
         }
-        else if (item.supported) line.append(button('Legg til', () => act('/api/select', item.meter_id)));
+        else if (item.supported) { const add=button('Legg til', () => act('/api/select', item.meter_id)); add.disabled=busy; line.append(add); }
         else line.append(' (ikke støttet)');
         div.append(line);
       }
@@ -277,7 +293,12 @@ def serve(registry, config, client, bus_lock, stop, port=8099, history_controlle
                 except (OSError, ValueError, KeyError):
                     self._send(409, {"error": "Lagret historikk kunne ikke leses"})
                     return
-                self._send(200, {"histories": entries})
+                from history_controller import history_file
+                job = history_controller.snapshot()
+                meter = job.get("archive_meter")
+                alias = history_file(history_controller.root,meter).stem if meter else None
+                self._send(200, {"histories": entries, "archive_alias":alias,
+                                 "archive_progress":job.get("archive_progress",{})})
             elif self.path.endswith("/api/raw.jsonl"):
                 try:
                     if raw_log is None:
@@ -328,6 +349,10 @@ def serve(registry, config, client, bus_lock, stop, port=8099, history_controlle
                     raise ValueError("invalid request length")
                 data = json.loads(self.rfile.read(length) or b"{}")
                 meter_id = data.get("meter_id")
+                if history_controller.blocked.is_set():
+                    raise ValueError("Normal telegram not yet verified")
+                if history_controller.snapshot()["status"] == "running":
+                    raise ValueError("History retrieval already running")
                 if route == "scan":
                     with registry.lock:
                         if registry.scan_status == "running":

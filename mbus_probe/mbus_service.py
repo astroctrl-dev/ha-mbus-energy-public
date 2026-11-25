@@ -322,7 +322,12 @@ def main():
     raw_log = RawLog()
     raw_log.set_enabled(config.get('raw_telegram_logging', False))
     install(raw_log)
-    server = serve(registry, config, client, bus_lock, STOP, raw_log=raw_log)
+    from history_controller import HistoryController
+    history_controller = HistoryController(registry,config,bus_lock,STOP,
+        on_complete=lambda meter_id,snapshot: publish_history(client,meter_id,snapshot))
+    history_controller.require_startup_normal()
+    server = serve(registry, config, client, bus_lock, STOP, raw_log=raw_log,
+                   history_controller=history_controller)
     maintenance = MaintenanceSchedule(config, server.clock_controller, server.history_controller, STOP)
     config["_clock_observer"] = maintenance.observe_clock
     def valid_round(meter_ids):

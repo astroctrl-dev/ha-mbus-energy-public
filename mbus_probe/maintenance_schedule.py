@@ -188,6 +188,8 @@ class MaintenanceSchedule:
         with self.lock:
             if self.worker and self.worker.is_alive():
                 return
+            if self.history.snapshot().get("status") == "running":
+                return
             if self.clock.snapshot().get("status") == "running":
                 return
             local = self.now().astimezone(self.zone)

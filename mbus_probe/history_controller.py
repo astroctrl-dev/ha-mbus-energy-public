@@ -59,10 +59,15 @@ class HistoryController:
                       "error": "Normalramme ikke verifisert; polling stoppet" if self.blocked.is_set() else None,
                       "captured_at_utc": None}
         self.worker = None
+        self.archive_progress = {}
+        self.archive_meter = None
+        self.archive_revision = 0
+        self.startup_pending = False
 
     def snapshot(self):
         with self.lock:
-            return dict(self.state)
+            return {**self.state, "archive_meter": self.archive_meter,
+                    "archive_progress": dict(self.archive_progress), "archive_revision": self.archive_revision}
 
     def _recovery_log(self, tx, rx):
         LOG.info("Recovery TX=%s RX length=%d bytes", tx.hex(" "), len(rx))
@@ -106,15 +111,66 @@ class HistoryController:
                 and decoded.get("medium_code") == 4 and decoded.get("status") in (0,0x10)
                 and t230_footer(decoded,4) is not None)
 
+    def require_startup_normal(self):
+        """Every process start must select and verify frame 1 on known meters."""
+        if self.registry.snapshot()["selected"]:
+            self.startup_pending = True
+            self.blocked.set()
+            with self.lock:
+                self.state = {"status":"restore_unverified","error":"Startup normal frame initialization pending",
+                              "captured_at_utc":None}
+
+    def _initialize_normal(self, selected, reader):
+        # Caller holds the bus and registry locks. Always select normal frame,
+        # even after a clean stop; never reset the meter or its registers.
+        self.root.mkdir(parents=True,exist_ok=True)
+        with self.marker.open("w") as guard:
+            json.dump({"operation":"startup_normal"},guard)
+            guard.flush()
+            os.fsync(guard.fileno())
+        fd = os.open(self.root,os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        for meter_id,address in selected:
+            if self.stop.is_set():
+                raise ValueError("startup interrupted")
+            port = self.config["serial_port"]
+            baud = int(self.config.get("baud",2400))
+            if not shared_timing_active() and self.stop.wait(61):
+                raise ValueError("startup interrupted")
+            LOG.info("Startup: selecting normal telegram at primary address %d",address)
+            self._restore_interface(port,baud,address)
+            if not shared_timing_active() and self.stop.wait(61):
+                raise ValueError("startup interrupted")
+            tx,frame = reader(port,baud,address,timeout=5)
+            self._recovery_log(tx,frame)
+            self._verify_recovery(validate(frame),address,meter_id)
+            LOG.info("Startup: normal telegram verified at primary address %d",address)
+
     def recover_normal(self, reader=read_one):
-        """Read first; optional interface restore only after confirmed frame-3 identity."""
+        """Read first; restore a confirmed interrupted app-owned archive or explicitly permitted historical frame."""
         if not self.blocked.is_set():
             return True
         try:
             with self.bus_lock, self.registry.lock:
                 selected = list(self.registry.selected.items())
+                try:
+                    owned = json.loads(self.marker.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    owned = None
                 if not selected:
                     return False
+                if self.startup_pending:
+                    self._initialize_normal(selected,reader)
+                    self.marker.unlink(missing_ok=True)
+                    self.startup_pending = False
+                    self.blocked.clear()
+                    with self.lock:
+                        self.state = {"status":"recovered","error":None,"captured_at_utc":None}
+                    LOG.info("Startup initialization complete; polling enabled")
+                    return True
                 for meter_id, address in selected:
                     if not shared_timing_active() and self.stop.wait(61):
                         return False
@@ -137,8 +193,12 @@ class HistoryController:
                                 if not self._confirmed_archive(decoded,address,meter_id):
                                     raise normal_error from None
                         LOG.warning("Recovery confirmed non-normal frame for selected meter")
-                        if self.config.get("allow_recovery_interface_reset") is not True:
+                        app_owned = (owned == {"operation":"archive_frame4","meter_id":meter_id,"address":address}
+                                     and self._confirmed_archive(decoded,address,meter_id))
+                        if not app_owned and self.config.get("allow_recovery_interface_reset") is not True:
                             raise ValueError("historical frame confirmed; interface restore disabled")
+                        if app_owned:
+                            LOG.info("Restoring interrupted app-owned archive to normal frame")
                         if len(selected) != 1:
                             raise ValueError("interface restore requires exactly one selected meter")
                         if not shared_timing_active() and self.stop.wait(61):
@@ -207,28 +267,45 @@ class HistoryController:
             if self.migration_status(meter_id) != "complete":
                 raise ValueError("retrieve ordinary monthly history first")
             self.state = {"status":"running","error":None,"captured_at_utc":None}
+            self.archive_meter = meter_id
+            self.archive_progress = {str(i):"waiting" for i in range(1,25)}
+            self.archive_revision += 1
             self.worker = threading.Thread(target=self._extended_archive_worker,args=(meter_id,),daemon=True)
             self.worker.start()
 
+    def _archive_row(self, position, status):
+        with self.lock:
+            self.archive_progress[str(position)] = status
+            self.archive_revision += 1
+
     def _extended_archive_worker(self, meter_id):
+        position = None
         try:
             path = history_file(self.root,meter_id)
             saved = json.loads(path.read_text(encoding="utf-8"))
             for row in saved["stands"]:
                 if self.stop.is_set():
                     raise ValueError("archive stopped")
+                position = row["month_back"]
                 evidence = row.get("frame4") or {}
                 maxima = evidence.get("maxima") or {}
                 if (evidence.get("cumulative_m3") is not None and evidence.get("meter_storage_local_time")
                     and all(maxima.get(k,{}).get("value") is not None and
                             maxima.get(k,{}).get("meter_local_time") and maxima.get(k,{}).get("read_at_utc")
                             for k in ("power","flow","flow_temperature","return_temperature"))):
+                    self._archive_row(position,"stored")
                     continue
-                saved = self.collect_archive_dev(meter_id,row["month_back"],approved=True,_reserved=True)
+                self._archive_row(position,"request")
+                LOG.info("Extended archive: requesting position %d/24",position)
+                saved = self.collect_archive_dev(meter_id,position,approved=True,_reserved=True)
+                self._archive_row(position,"completed")
+                LOG.info("Extended archive: position %d/24 validated and saved",position)
             with self.lock:
                 self.state = {"status":"complete","error":None,"captured_at_utc":saved["captured_at_utc"]}
         except Exception as exc:
-            LOG.warning("Extended archive stopped: %s",type(exc).__name__)
+            if position is not None:
+                self._archive_row(position,"failed")
+            LOG.warning("Extended archive stopped at position %s: %s",position,type(exc).__name__)
             with self.lock:
                 self.state = {"status":"restore_unverified" if self.blocked.is_set() or self.marker.exists() else "failed",
                               "error":"Extended archive stopped; previously saved data retained",
@@ -258,32 +335,36 @@ class HistoryController:
                     address = self.registry.selected.get(meter_id)
                     if address is None or self.stop.is_set() or self.blocked.is_set():
                         raise ValueError("selected meter unavailable")
-                    path = history_file(self.root,meter_id)
-                    saved = json.loads(path.read_text(encoding="utf-8"))
-                    if saved.get("schema_version") != 3:
-                        raise ValueError("migration required")
-                    if len(saved.get("stands",[])) != 24 or len(saved.get("bounded_periods",[])) != 23:
-                        raise ValueError("incomplete existing history")
-                    self.root.mkdir(parents=True,exist_ok=True)
-                    with self.marker.open("w") as guard:
-                        guard.flush()
-                        os.fsync(guard.fileno())
-                    fd = os.open(self.root,os.O_RDONLY)
-                    try:
-                        os.fsync(fd)
-                    finally:
-                        os.close(fd)
-                    try:
-                        updated = reader(saved,self.config["serial_port"],
-                            int(self.config.get("baud",2400)),address,meter_id,month_back,
-                            approved=True)
-                        self.marker.unlink()
-                    except ArchiveDataError:
-                        self.marker.unlink()
-                        raise
-                    except Exception:
-                        self.blocked.set()
-                        raise
+                path = history_file(self.root,meter_id)
+                saved = json.loads(path.read_text(encoding="utf-8"))
+                if saved.get("schema_version") != 3:
+                    raise ValueError("migration required")
+                if len(saved.get("stands",[])) != 24 or len(saved.get("bounded_periods",[])) != 23:
+                    raise ValueError("incomplete existing history")
+                self.root.mkdir(parents=True,exist_ok=True)
+                with self.marker.open("w") as guard:
+                    json.dump({"operation":"archive_frame4","meter_id":meter_id,"address":address},guard)
+                    guard.flush()
+                    os.fsync(guard.fileno())
+                fd = os.open(self.root,os.O_RDONLY)
+                try:
+                    os.fsync(fd)
+                finally:
+                    os.close(fd)
+                try:
+                    updated = reader(saved,self.config["serial_port"],
+                        int(self.config.get("baud",2400)),address,meter_id,month_back,
+                        approved=True)
+                    self.marker.unlink()
+                except ArchiveDataError:
+                    self.marker.unlink()
+                    raise
+                except Exception:
+                    self.blocked.set()
+                    raise
+                with self.registry.lock:
+                    if self.registry.selected.get(meter_id) != address:
+                        raise ValueError("selected meter changed")
                     save_snapshot(path,updated)
             if self.on_complete:
                 try:
@@ -317,6 +398,9 @@ class HistoryController:
             if self.migration_status(meter_id) in ("pending", "invalid"):
                 raise ValueError("migrate saved history before collection")
             self.state = {"status": "running", "error": None, "captured_at_utc": None}
+            self.archive_progress = {}
+            self.archive_meter = None
+            self.archive_revision += 1
             self.worker = threading.Thread(target=self._collect, args=(meter_id, address, replace, settings_only), daemon=True)
             self.worker.start()
 
