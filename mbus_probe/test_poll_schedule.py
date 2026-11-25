@@ -8,11 +8,11 @@ class ScheduleTests(unittest.TestCase):
 
     def test_five_seconds_before_hour(self):
         self.assertEqual(next_hour_delay(3590, 5), 5)
-        self.assertEqual(next_poll_wait(120, True, 5, now=3590), 61)
+        self.assertEqual(next_poll_wait(120, True, 5, now=3590), 60)
 
     def test_even_old_short_interval_cannot_bypass_guard(self):
-        self.assertEqual(next_poll_wait(10, False), 61)
-        self.assertEqual(next_poll_wait(90, True, 5, now=3590), 61)
+        self.assertEqual(next_poll_wait(10, False), 60)
+        self.assertEqual(next_poll_wait(90, True, 5, now=3590), 60)
 
     def test_after_target_goes_to_next_hour(self):
         self.assertEqual(next_hour_delay(3596, 5), 3599)

@@ -49,8 +49,8 @@ class ClockMaintenanceTests(unittest.TestCase):
         self.assertTrue(result["changed"])
         self.assertEqual(result["before"], "2026-11-23T00:10")
         self.assertEqual(result["after"], "2026-11-23T04:00")
-        self.assertEqual(events[0], 61)
-        self.assertEqual(events[-1], 61)
+        self.assertEqual(events[0], 60)
+        self.assertEqual(events[-1], 60)
         self.assertEqual(len(ser.sent), 1)
 
     @patch("clock_maintenance._read_clock")
@@ -210,7 +210,7 @@ class MinuteBoundaryTests(unittest.TestCase):
         result = sync_once("/dev/ttyUSB0", 2400, 7, "12345678", "Europe/Oslo",
                            serial_factory=lambda *a, **k: ser, sleep=sleep,
                            now=lambda: current[0])
-        self.assertEqual(waits, [61, 39, 61])
+        self.assertEqual(waits, [60, 40, 60])
         self.assertEqual(result["target"], "2026-11-23T04:02+01:00")
         self.assertEqual(ser.sent[0][9], 2)
 

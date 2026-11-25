@@ -145,10 +145,10 @@ class PollIntervalConfigTests(unittest.TestCase):
         baseline = {"mqtt_host": "core-mosquitto", "serial_port": "/dev/ttyUSB0"}
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "options.json"
-            for interval in (90, 120, 300, 600):
+            for interval in (60, 90, 120, 300, 600):
                 path.write_text(json.dumps({**baseline, "interval_seconds": interval}))
                 self.assertEqual(load_config(str(path))["interval_seconds"], interval)
-            for interval in (0, 5, 10, 20, 30, 60, 61, 301, 601, -1):
+            for interval in (0, 5, 10, 20, 30, 59, 61, 301, 601, -1):
                 path.write_text(json.dumps({**baseline, "interval_seconds": interval}))
                 with self.subTest(interval=interval), self.assertRaises(ValueError):
                     load_config(str(path))

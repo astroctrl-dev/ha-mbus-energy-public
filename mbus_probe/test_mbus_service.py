@@ -50,12 +50,12 @@ class ServiceTests(unittest.TestCase):
             clock = [1000.0]
             first = Waiter()
             self.assertTrue(RequestPacer(path, clock=lambda: clock[0]).before_request(first))
-            self.assertEqual(first.delays, [61.0])
+            self.assertEqual(first.delays, [60.0])
             self.assertEqual(float(path.read_text()), 1000.0)
             clock[0] = 1009.0
             after_restart = Waiter()
             self.assertTrue(RequestPacer(path, clock=lambda: clock[0]).before_request(after_restart))
-            self.assertEqual(after_restart.delays, [52.0])
+            self.assertEqual(after_restart.delays, [51.0])
             clock[0] = 1080.0
             next_cycle = Waiter()
             self.assertTrue(RequestPacer(path, clock=lambda: clock[0]).before_request(next_cycle))

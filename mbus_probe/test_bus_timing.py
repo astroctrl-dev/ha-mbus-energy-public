@@ -23,11 +23,11 @@ class TimingTests(unittest.TestCase):
             with self.assertRaises(OSError):
                 gate.write(Serial(), b"fail")
             gate.write(Serial(), b"restore")
-            self.assertEqual(stamps, [61., 122., 183.])
+            self.assertEqual(stamps, [60., 120., 180.])
             restarted = BusTiming(Path(root) / "last", lambda: now[0],
                                   lambda: 1000 + now[0], sleep)
             restarted.write(Serial(), b"poll")
-            self.assertEqual(stamps[-1], 244.)
+            self.assertEqual(stamps[-1], 240.)
 
 
     def test_deferred_frame_is_built_after_gate_wait(self):
@@ -45,7 +45,7 @@ class TimingTests(unittest.TestCase):
                 built.append(now[0])
                 return b"clock"
             gate.write(Serial(), build)
-            self.assertEqual(built, [61.])
+            self.assertEqual(built, [60.])
             self.assertFalse(gate.ready())
 
 
@@ -97,7 +97,7 @@ class TimingTests(unittest.TestCase):
                     read_one("/dev/test", 2400, 0, 2)
                     write_frame(Serial(), b"restore")
                     read_one("/dev/test", 2400, 0, 2)
-                self.assertEqual(stamps, [61., 122., 183.])
+                self.assertEqual(stamps, [60., 120., 180.])
             finally:
                 install_bus_timing(None)
 
@@ -120,8 +120,8 @@ class TimingTests(unittest.TestCase):
                 self.assertEqual(gate.write(Serial(), b"ok"), 2)
                 with self.assertRaises(OSError):
                     gate.write(Serial(), b"fail")
-            self.assertEqual(seen, [(False, 122., 61., "sent"),
-                                    (False, 183., 122., "write_error")])
+            self.assertEqual(seen, [(False, 120., 60., "sent"),
+                                    (False, 180., 120., "write_error")])
 
 
 class ResumeTests(unittest.TestCase):
@@ -144,11 +144,11 @@ class ResumeTests(unittest.TestCase):
             now[0] += 40
             restarted = gate()
             restarted.write(Serial(), b"two")
-            self.assertEqual(stamps, [100., 161.])
+            self.assertEqual(stamps, [100., 160.])
             restarted._persist_resume(None)
-            self.assertEqual(gate().eligible, 222.)
+            self.assertEqual(gate().eligible, 220.)
             now[0] += 80
-            restarted._persist_resume(161.)
+            restarted._persist_resume(160.)
             self.assertTrue(gate().ready())
 
 
@@ -187,3 +187,30 @@ class SlotToleranceTests(unittest.TestCase):
                 with poll_slot(3595., slot_tolerance(True, 3595.)):
                     with self.assertRaises(MissedSlot):
                         gate.write(Serial(), b"read")
+
+    def test_sixty_second_boundary(self):
+        now = [0.]
+        with tempfile.TemporaryDirectory() as root:
+            gate = BusTiming(Path(root)/"last", lambda: now[0], lambda: now[0],
+                             lambda d: now.__setitem__(0,now[0]+d))
+            now[0] = 59.999
+            self.assertFalse(gate.ready())
+            now[0] = 60.
+            self.assertTrue(gate.ready())
+
+    def test_quiet_period_starts_after_serial_drain(self):
+        now = [0.]
+        starts = []
+        class Serial:
+            def write(self, frame):
+                starts.append(now[0])
+                return len(frame)
+            def flush(self):
+                now[0] += 0.05
+        with tempfile.TemporaryDirectory() as root:
+            gate = BusTiming(Path(root)/"last", lambda: now[0], lambda: now[0],
+                             lambda d: now.__setitem__(0,now[0]+d))
+            gate.write(Serial(),b"one")
+            gate.write(Serial(),b"two")
+            self.assertGreater(starts[1]-starts[0],60.)
+            self.assertAlmostEqual(starts[1]-starts[0],60.05)

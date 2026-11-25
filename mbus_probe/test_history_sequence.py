@@ -92,8 +92,8 @@ class HistorySequenceTests(unittest.TestCase):
                         with self.assertRaisesRegex(ValueError, "selection was not acknowledged"):
                             run("/dev/test", 2400, 0, "00000000")
                 self.assertEqual(len(stamps), expected_writes)
-                self.assertTrue(all(b-a >= 61 for a,b in zip(stamps, stamps[1:])))
-                self.assertGreaterEqual(clock[0]-stamps[-1], 61)
+                self.assertTrue(all(b-a >= 60 for a,b in zip(stamps, stamps[1:])))
+                self.assertGreaterEqual(clock[0]-stamps[-1], 60)
 
     def test_optional_frame_two_preserves_restore_sequence(self):
         serial = SerialScript(b"\xe5" + HISTORY_FRAME + b"\xe5" + HISTORY_FRAME

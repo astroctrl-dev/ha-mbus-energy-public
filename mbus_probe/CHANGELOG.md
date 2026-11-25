@@ -1,3 +1,14 @@
+## v2.9.0 (stable)
+
+- Extended monthly archive with historical volume and maximum power, flow and temperature measurements.
+- Resumable manual retrieval with individual validated archive positions saved and complete positions skipped.
+- Responsive Web UI with live per-position progress.
+- Read-first startup with immediate publication of verified normal telegrams and automatic restoration from confirmed historical telegram mode.
+- Shared minimum 60-second quiet period after serial transmission. A 60-second polling interval is now selectable; slots that cannot meet the guard are skipped.
+- Initial readings normally arrive within approximately 60 seconds. Recovery from historical telegram mode may take approximately three minutes; communication errors may extend this time.
+- Existing entity identifiers and saved history preserved. No active frame-5 battery acquisition.
+- Automated regression tests and container build passed. Physical beta testing confirmed ordinary readings, archive resumption and live progress. Full archive completion and physical verification of revised timing remain outstanding. Back up before updating.
+
 ## v2.9.0-beta.3
 
 Manual Retrieve Monthly Archive now reads missing extended monthly records on meters with complete saved energy history. Saves and publishes each successfully validated month after restoring normal operation. Stops on first rejected record; existing data retained. Full collection can take over 90 minutes. Physical frame 4 validation remains pending; frame 5 battery acquisition is not enabled. No automatic extended collection.
