@@ -1,6 +1,6 @@
-# Opt-in beta: v2.5.0-beta.1
+# Public beta: v2.5.0-beta.1
 
-Add `https://github.com/astroctrl-dev/ha-mbus-energy-public#beta` to the Home Assistant App Store on an isolated test instance. Do not run stable and beta against the same adapter or MQTT identity. This channel may create a separate app identity. See [beta release notes](RELEASE-2.5.0-beta.1.md).
+The ordinary Home Assistant App Store repository now offers v2.5.0-beta.1, a public prerelease. Back up the existing app and its data before updating. Stable v2.4.0 remains available as a GitHub release and as a backup restore target. Physical validation and existing temperature statistics verification are pending. See [beta release notes](RELEASE-2.5.0-beta.1.md).
 
 # M-Bus T230 energy metering for Home Assistant
 
