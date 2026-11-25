@@ -66,7 +66,7 @@ class MqttTests(unittest.TestCase):
         client = FakeClient()
         values = publish_reading(client, self.decoded, "00000000")
         self.assertEqual(values["energy"], 12345)
-        self.assertEqual(len(client.messages), 37)
+        self.assertEqual(len(client.messages), 40)
         self.assertEqual(client.messages[-1],
                          (availability_topic(device_key("00000000")), "online", 1, True))
         self.assertFalse(any("wrong_installation" in t for t, _, _, _ in client.messages))
@@ -306,8 +306,8 @@ class DiagnosticPlacementTests(unittest.TestCase):
         publish_reading(client, decoded, "00000000", read_at_utc="2026-11-25T18:00:00Z")
         payloads = {t:p for t,p,_,_ in client.messages}
         root = f"mbus/t230/{device_key('00000000')}"
-        self.assertEqual(json.loads(payloads[root+"/flow/attributes"]), {
-            "flow_measurement_interval_seconds":4, "flow_averaging_interval_seconds":8})
+        self.assertEqual(json.loads(payloads[root+"/flow/attributes"])["flow_measurement_interval_seconds"], 4)
+        self.assertEqual(json.loads(payloads[root+"/flow/attributes"])["flow_averaging_interval_seconds"], 8)
         self.assertEqual(json.loads(payloads[root+"/meter_status/attributes"]), {
             "extension_byte":"0x62", "read_at_utc":"2026-11-25T18:00:00Z"})
         self.assertEqual(payloads[root+"/firmware_version/state"], "7.12")
@@ -319,3 +319,71 @@ class DiagnosticPlacementTests(unittest.TestCase):
         # An invalid entire measurement frame is not published.
         with self.assertRaises(ValueError):
             publish_reading(client, decoded, "00000000")
+
+class MaximaPublicationTests(unittest.TestCase):
+    def test_maxima_attributes_do_not_replace_current_states(self):
+        from mbus_records import decode_records
+        decoded = validate(bytes.fromhex(Path(__file__).with_name(
+            "fixture_t230_sanitized.hex").read_text()))
+        decoded["records"] = [r for r in decoded["records"] if
+                              r.get("kind") != "manufacturer_specific" and
+                              r.get("dife_hex") != "10"]
+        decoded["records"] += decode_records(bytes.fromhex(
+            "9b 10 2d 20 01 00 94 10 ad 6f 00 0b 92 29 0f 12 07 00 62 01"))
+        client = FakeClient()
+        values = publish_reading(client, decoded, "00000000")
+        root = f"mbus/t230/{device_key('00000000')}"
+        messages = {t:p for t,p,_,_ in client.messages}
+        attrs = json.loads(messages[root+"/power/attributes"])
+        self.assertEqual(attrs["maximum"], 12.0)
+        self.assertEqual(attrs["maximum_meter_local_time"], "2020-09-18T11:00")
+        self.assertEqual(attrs["maximum_unit"], "kW")
+        self.assertEqual(float(messages[root+"/power/state"]), values["power"])
+        for kind in ("flow", "flow_temperature", "return_temperature"):
+            self.assertIsNone(json.loads(messages[root+"/"+kind+"/attributes"])["maximum"])
+        decoded["records"] = [r for r in decoded["records"] if r.get("dif") != 0x9b]
+        client.messages.clear()
+        publish_reading(client, decoded, "00000000")
+        messages = {t:p for t,p,_,_ in client.messages}
+        self.assertIsNone(json.loads(messages[root+"/power/attributes"])["maximum"])
+
+class ArchiveViewTests(unittest.TestCase):
+    def test_history_attributes_keep_energy_states(self):
+        from history_model import build_snapshot
+        snap = build_snapshot([{"month_back":n,"value":1000-n,"unit":"kWh"}
+                               for n in range(1,25)], "2026-11-25T10:00:00Z")
+        for row, volume in zip(snap["stands"], (10.2, 10.0)):
+            row["frame4"] = {"cumulative_m3":volume, "maxima":{},
+                             "meter_storage_local_time":"2026-11-01T00:00"}
+        client = FakeClient()
+        publish_history(client,"12345678",snap)
+        root = f"mbus/t230/{device_key('12345678')}"
+        messages = {t:p for t,p,_,_ in client.messages}
+        self.assertEqual(float(messages[root+"/history_stand_1/state"]),999)
+        self.assertEqual(float(messages[root+"/history_period_1/state"]),1)
+        self.assertEqual(json.loads(messages[root+"/history_stand_1/attributes"])["cumulative_m3"],10.2)
+        self.assertEqual(json.loads(messages[root+"/history_period_1/attributes"])["period_m3"],0.2)
+        self.assertIsNone(json.loads(messages[root+"/history_period_2/attributes"])["period_m3"])
+
+class PeriodGroupTests(unittest.TestCase):
+    def test_group_stamp_is_separate_from_original_read(self):
+        from history_model import build_snapshot
+        snap = build_snapshot([{"month_back":n,"value":1000-n,"unit":"kWh"}
+                               for n in range(1,25)], "2026-11-25T10:00:00Z")
+        snap["stands"][0]["read_at_utc"]="2026-11-25T10:00:00Z"
+        snap["stands"][0]["frame4"]={"cumulative_m3":12.0,
+            "meter_storage_local_time":"2026-11-01T00:00",
+            "maxima":{"power":{"value":12,"unit":"kW"}}}
+        for p in snap["bounded_periods"]:
+            p["group_updated_at_utc"]="2026-11-26T11:00:00Z"
+        client=FakeClient()
+        publish_history(client,"12345678",snap)
+        root=f"mbus/t230/{device_key('12345678')}"
+        messages={t:p for t,p,_,_ in client.messages}
+        stand=json.loads(messages[root+"/history_stand_1/attributes"])
+        period=json.loads(messages[root+"/history_period_1/attributes"])
+        self.assertEqual(stand["read_at_utc"],"2026-11-25T10:00:00Z")
+        self.assertNotIn("group_updated_at_utc",stand)
+        self.assertEqual(period["monthly_maxima"]["power"]["value"],12)
+        self.assertEqual(period["instrument_storage_local_time"],"2026-11-01T00:00")
+        self.assertEqual(period["group_updated_at_utc"],"2026-11-26T11:00:00Z")

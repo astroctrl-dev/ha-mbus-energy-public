@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 from ha_measurements import REQUIRED_SENSORS, SENSORS, select_measurements
 from temperature_units import DIFFERENCE
 from mbus_records import passive_diagnostics
+from maxima import project_maxima, FIELDS
+from archive_view import archive_attributes, period_archive_attributes
 
 HA_UNITS = {"kWh": "kWh", "m3": "m³", "kW": "kW", "m3/h": "m³/h",
             "C": "°C", "K": "K", "h": "h"}
@@ -50,8 +52,8 @@ def discovery_messages(meter_id):
             "availability_mode": "all", "unit_of_measurement": HA_UNITS[unit],
             "state_class": state_class,
         }
-        if kind == "flow":
-            payload["json_attributes_topic"] = f"mbus/t230/{key}/flow/attributes"
+        if kind in FIELDS:
+            payload["json_attributes_topic"] = f"mbus/t230/{key}/{kind}/attributes"
         if kind == DIFFERENCE:
             # Keep the native K value and let HA convert intervals without an offset.
             payload["device_class"] = "temperature_delta"
@@ -219,6 +221,7 @@ def publish_history(client, meter_id, snapshot):
             attributes["date_assumption"] = "first_of_month"
         if stand.get("date_source") == "meter_verified" and stand.get("meter_date"):
             attributes["meter_date"] = stand["meter_date"]
+        attributes.update(archive_attributes(stand))
         result = client.publish(f"mbus/t230/{key}/history_stand_{index}/attributes",
                                 json.dumps(attributes), qos=1, retain=False)
         if result.rc:
@@ -254,6 +257,7 @@ def publish_history(client, meter_id, snapshot):
                 attributes["meter_start_date"] = period["meter_start_date"]
             if period.get("meter_end_date"):
                 attributes["meter_end_date"] = period["meter_end_date"]
+        attributes.update(period_archive_attributes(period, by_stand[index], by_stand[index+1]))
         result = client.publish(f"mbus/t230/{key}/history_period_{index}/attributes",
                                 json.dumps(attributes), qos=1, retain=False)
         if result.rc:
@@ -305,10 +309,20 @@ def publish_reading(client, decoded, meter_id, read_at_utc=None, clock_attribute
             raise ConnectionError("MQTT diagnostic publish failed")
         result.wait_for_publish(timeout=5)
     diagnostics = passive_diagnostics(decoded)
+    maxima = project_maxima(decoded)
+    maxima["flow"].update({name: diagnostics[name] for name in
+                           ("flow_measurement_interval_seconds", "flow_averaging_interval_seconds")})
+    for kind, attrs in maxima.items():
+        attrs["maximum_unit"] = HA_UNITS[attrs.pop("unit")]
+        attrs["maximum_time_basis"] = "meter_local_unspecified"
+        attrs["maximum_read_at_utc"] = read_at_utc if attrs["maximum"] is not None else None
+        attrs["previous_annual_maximum_read_at_utc"] = read_at_utc if attrs["previous_annual_maximum"] is not None else None
+        result = client.publish(f"mbus/t230/{key}/{kind}/attributes",
+                                json.dumps(attrs), qos=1, retain=False)
+        if result.rc:
+            raise ConnectionError("MQTT maximum attributes publish failed")
+        result.wait_for_publish(timeout=5)
     for suffix, payload in (
-            ("flow/attributes", json.dumps({
-                name: diagnostics[name] for name in
-                ("flow_measurement_interval_seconds", "flow_averaging_interval_seconds")})),
             ("meter_status/attributes", json.dumps({
                 "extension_byte": diagnostics["extension_byte"], "read_at_utc": read_at_utc})),
             ("firmware_version/state", diagnostics["firmware_version"] or "unknown")):

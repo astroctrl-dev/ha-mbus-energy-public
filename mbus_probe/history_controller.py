@@ -12,6 +12,8 @@ from analysis_export import _alias
 from history_model import migrate_snapshot, configured_anchor, build_snapshot, detect_month_shift, estimated_month_at_capture, save_snapshot
 from mqtt_bridge import device_key
 from rolling_history import merge_history
+from archive_acquisition import ArchiveDataError
+from mbus_records import t230_footer
 from monthly_diagnostic import (RestorationError, run as read_months, extract_months, extract_monthly_set_day,
                                 restore_normal_frame, read_response)
 from mbus_probe import read_one, validate
@@ -96,6 +98,14 @@ class HistoryController:
             LOG.warning("Normal frame verified with unavailable measurements: %s",
                         ", ".join(sorted(REQUIRED_SENSORS - values.keys())))
 
+    @staticmethod
+    def _confirmed_archive(decoded, address, meter_id):
+        return (decoded.get("type") == "long" and decoded.get("ci") == 0x72
+                and decoded.get("control") in (8,24) and decoded.get("address") == address
+                and decoded.get("meter_id") == meter_id and decoded.get("manufacturer") == "LUG"
+                and decoded.get("medium_code") == 4 and decoded.get("status") in (0,0x10)
+                and t230_footer(decoded,4) is not None)
+
     def recover_normal(self, reader=read_one):
         """Read first; optional interface restore only after confirmed frame-3 identity."""
         if not self.blocked.is_set():
@@ -124,7 +134,8 @@ class HistoryController:
                             try:
                                 extract_monthly_set_day(frame, address, meter_id)
                             except ValueError:
-                                raise normal_error from None
+                                if not self._confirmed_archive(decoded,address,meter_id):
+                                    raise normal_error from None
                         LOG.warning("Recovery confirmed non-normal frame for selected meter")
                         if self.config.get("allow_recovery_interface_reset") is not True:
                             raise ValueError("historical frame confirmed; interface restore disabled")
@@ -183,6 +194,68 @@ class HistoryController:
             except (OSError, ValueError, ConnectionError, RuntimeError):
                 LOG.warning("Migration saved; MQTT publication pending")
         return snapshot
+
+    def collect_archive_dev(self, meter_id, month_back, *, approved=False, reader=None):
+        """Single dev transaction only. No GUI, polling or startup caller.
+        Explicit approval and shared timing mandatory; serialize against all
+        collection and retain the existing durable normal-frame guard on failure.
+        """
+        if approved is not True or not shared_timing_active():
+            raise ValueError("archive dev acquisition requires approval and shared timing")
+        if self.config.get("allow_monthly_history") is not True:
+            raise ValueError("monthly history disabled")
+        if type(month_back) is not int or not 1 <= month_back <= 24:
+            raise ValueError("invalid month")
+        if reader is None:
+            from archive_serial import read_archive
+            reader = read_archive
+        with self.lock:
+            if self.state["status"] == "running" or self.stop.is_set() or self.blocked.is_set():
+                raise ValueError("history unavailable")
+            self.state = {"status":"running","error":None,"captured_at_utc":None}
+        try:
+            with self.bus_lock:
+                with self.registry.lock:
+                    address = self.registry.selected.get(meter_id)
+                    if address is None or self.stop.is_set() or self.blocked.is_set():
+                        raise ValueError("selected meter unavailable")
+                    path = history_file(self.root,meter_id)
+                    saved = json.loads(path.read_text(encoding="utf-8"))
+                    if saved.get("schema_version") != 3:
+                        raise ValueError("migration required")
+                    if len(saved.get("stands",[])) != 24 or len(saved.get("bounded_periods",[])) != 23:
+                        raise ValueError("incomplete existing history")
+                    self.root.mkdir(parents=True,exist_ok=True)
+                    with self.marker.open("w") as guard:
+                        guard.flush()
+                        os.fsync(guard.fileno())
+                    fd = os.open(self.root,os.O_RDONLY)
+                    try:
+                        os.fsync(fd)
+                    finally:
+                        os.close(fd)
+                    try:
+                        updated = reader(saved,self.config["serial_port"],
+                            int(self.config.get("baud",2400)),address,meter_id,month_back,
+                            approved=True)
+                        self.marker.unlink()
+                    except ArchiveDataError:
+                        self.marker.unlink()
+                        raise
+                    except Exception:
+                        self.blocked.set()
+                        raise
+                    save_snapshot(path,updated)
+            with self.lock:
+                self.state = {"status":"complete","error":None,
+                              "captured_at_utc":updated["captured_at_utc"]}
+            return updated
+        except Exception:
+            with self.lock:
+                self.state = {"status":"restore_unverified" if self.marker.exists() else "failed",
+                              "error":"Archive collection failed; existing history preserved",
+                              "captured_at_utc":None}
+            raise
 
     def start(self, meter_id, *, replace=False, settings_only=False):
         if self.config.get("allow_monthly_history") is not True:

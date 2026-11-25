@@ -214,6 +214,7 @@ def make_xlsx(samples, history=None, language='en-GB', temperature_unit=None):
                 data.get(key) for key in ("flow_measurement_interval_seconds",
                 "flow_averaging_interval_seconds", "firmware_version", "extension_byte")))
     if history:
+        from archive_view import archive_attributes, period_volume
         histories = [("", history)] if isinstance(history, dict) else list(history)
         stands = wb.create_sheet("Månedshistorikk")
         stands.append(("alias", "storage", "month_back", "cumulative_kwh",
@@ -223,7 +224,13 @@ def make_xlsx(samples, history=None, language='en-GB', temperature_unit=None):
         periods.append(("alias", "newer_storage", "older_storage", "period_kwh",
                         "meter_start_date", "meter_end_date", "estimated_start_date",
                         "estimated_end_date", "date_source", "rollover_evidence",
-                        "read_at_utc", "newer_read_at_utc", "older_read_at_utc"))
+                        "read_at_utc", "newer_read_at_utc", "older_read_at_utc",
+                        "group_updated_at_utc", "instrument_storage_local_time"))
+        archive = wb.create_sheet("Monthly volume and maxima") if any(
+            row.get("frame4") for _, snapshot in histories for row in snapshot.get("stands", [])) else None
+        if archive is not None:
+            archive.append(("alias", "month_back", "meter_storage_local_time", "cumulative_m3",
+                            "period_m3", "frame4_first_read_at_utc", "metric", "maximum", "unit", "maximum_meter_local_time", "maximum_read_at_utc", "maximum_meter_local_time_read_at_utc"))
         errors = None
         if any(snapshot.get("error_history") for _, snapshot in histories):
             errors = wb.create_sheet("Error history")
@@ -244,6 +251,19 @@ def make_xlsx(samples, history=None, language='en-GB', temperature_unit=None):
             if (len(snapshot.get("stands", ())) != 24 or
                     len(snapshot.get("bounded_periods", ())) != 23):
                 raise ValueError("incomplete history snapshot")
+            by_position = {r["month_back"]: r for r in snapshot["stands"]}
+            if archive is not None:
+                for position, row in sorted(by_position.items()):
+                    evidence = archive_attributes(row)
+                    if not row.get("frame4"):
+                        continue
+                    delta = period_volume(row, by_position.get(position+1, {}))
+                    for metric in ("power", "flow", "flow_temperature", "return_temperature"):
+                        maximum = evidence["monthly_maxima"].get(metric) or {}
+                        archive.append((alias, position, evidence["frame4_meter_storage_local_time"],
+                                        evidence["cumulative_m3"], delta, evidence["frame4_first_read_at_utc"],
+                                        metric, maximum.get("value"), maximum.get("unit"), maximum.get("meter_local_time"),
+                                        maximum.get("read_at_utc"), maximum.get("meter_local_time_read_at_utc")))
             for r in snapshot["stands"]:
                 stands.append((alias, r["storage"], r["month_back"], r["cumulative_kwh"],
                                r["meter_date"], r.get("estimated_date"), r["date_source"],
@@ -255,7 +275,9 @@ def make_xlsx(samples, history=None, language='en-GB', temperature_unit=None):
                                 "meter_start_date", "meter_end_date", "estimated_start_date",
                                 "estimated_end_date", "date_source")) +
                                (snapshot.get("rollover_evidence", "not_observed"),
-                                r.get("read_at_utc"), r.get("newer_read_at_utc"), r.get("older_read_at_utc")))
+                                r.get("read_at_utc"), r.get("newer_read_at_utc"), r.get("older_read_at_utc"),
+                                r.get("group_updated_at_utc"),
+                                archive_attributes(next(s for s in snapshot["stands"] if s["storage"] == r["newer_storage"]))["frame4_meter_storage_local_time"]))
     for sheet in wb:
         sheet.freeze_panes = "A2"
         sheet.auto_filter.ref = sheet.dimensions

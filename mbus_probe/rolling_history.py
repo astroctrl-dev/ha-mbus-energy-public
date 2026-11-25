@@ -53,4 +53,9 @@ def merge_history(previous, incoming, read_at, *, replace=False):
         period["estimated_date"] = newer.get("estimated_date")
         if newer.get("date_source") == older.get("date_source"):
             period["date_source"] = newer.get("date_source")
+    if not replace and shift is not None and previous:
+        group_stamp = next((p.get("group_updated_at_utc") for p in previous.get("bounded_periods", []) if p.get("group_updated_at_utc")), None)
+        if group_stamp:
+            for p in result["bounded_periods"]:
+                p.setdefault("group_updated_at_utc", group_stamp)
     return result

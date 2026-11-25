@@ -163,3 +163,51 @@ class HistoryControllerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class ArchiveControllerTests(unittest.TestCase):
+    def setUp(self):
+        from history_controller import history_file
+        from history_model import build_snapshot, migrate_snapshot, save_snapshot
+        from datetime import date
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        root = Path(self.tmp.name)
+        registry = MeterRegistry(root / "meters.json")
+        registry.set_found([{"meter_id":"00000000","address":0,"supported":True}])
+        registry.select("00000000")
+        self.controller = HistoryController(registry, {"allow_monthly_history":True,
+            "serial_port":"/dev/unused","baud":2400}, threading.Lock(), threading.Event(), root/"analysis")
+        self.path = history_file(self.controller.root,"00000000")
+        self.saved = migrate_snapshot(build_snapshot(months(),"2026-11-25T10:00:00Z",
+            estimated_month=date(2026,11,1)))
+        save_snapshot(self.path,self.saved)
+        self.original = self.path.read_bytes()
+
+    def test_dev_approval_required(self):
+        with patch("history_controller.shared_timing_active",return_value=True):
+            with self.assertRaises(ValueError):
+                self.controller.collect_archive_dev("00000000",1,reader=lambda *a,**k:self.fail("I/O"))
+        self.assertEqual(self.path.read_bytes(),self.original)
+
+    def test_data_rejection_preserves_file_without_blocking(self):
+        from archive_acquisition import ArchiveDataError
+        def reader(*a,**k):
+            self.assertTrue(self.controller.bus_lock.locked())
+            self.assertTrue(self.controller.marker.exists())
+            raise ArchiveDataError("conflict")
+        with patch("history_controller.shared_timing_active",return_value=True):
+            with self.assertRaises(ArchiveDataError):
+                self.controller.collect_archive_dev("00000000",1,approved=True,reader=reader)
+        self.assertEqual(self.path.read_bytes(),self.original)
+        self.assertFalse(self.controller.blocked.is_set())
+        self.assertFalse(self.controller.marker.exists())
+
+    def test_restore_failure_preserves_file_and_guard(self):
+        def reader(*a,**k):
+            raise RestorationError("uncertain")
+        with patch("history_controller.shared_timing_active",return_value=True):
+            with self.assertRaises(RestorationError):
+                self.controller.collect_archive_dev("00000000",1,approved=True,reader=reader)
+        self.assertEqual(self.path.read_bytes(),self.original)
+        self.assertTrue(self.controller.blocked.is_set())
+        self.assertTrue(self.controller.marker.exists())

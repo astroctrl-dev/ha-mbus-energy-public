@@ -1,3 +1,7 @@
+# Current app update: v2.9.0-beta.1
+
+v2.9.0-beta.1: passive maximum values and meter-local event times on existing Power, Flow and temperature sensors, with observation timestamps. Historical data projection includes individual maximum read provenance and group update time when supplemental evidence exists. Existing energy states and original read dates are preserved. Frame 4 acquisition is dev-only and not exposed in the UI; frame 5 battery acquisition is not enabled. No extra automatic bus requests. Physical validation outstanding. Back up before updating.
+
 # Current app update: v2.8.0 (stable)
 
 Adds five individually named historical diagnostic event sensors, a firmware sensor and flow timing attributes. Historical event dates are meter-local text; missing dates are unknown, not active alarms. Excel includes event names and individual historical read timestamps. Aligned existing historical stands and period metadata are preserved. No additional bus requests or estimated battery life. Frame-5 battery diagnostics are not enabled. Back up before updating. See [changelog](mbus_probe/CHANGELOG.md).

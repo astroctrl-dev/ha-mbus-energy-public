@@ -131,3 +131,21 @@ class DiagnosticExportTests(unittest.TestCase):
         self.assertEqual(rows[1][2:], ("FT", "2026-11-22T19:03", "not_inferred", "Last Negative Temperature Difference (FT)"))
         self.assertIsNone(rows[2][3])
         wb.close()
+
+class ArchiveExportTests(unittest.TestCase):
+    def test_frame4_sheet_is_optional_and_energy_unchanged(self):
+        from history_model import build_snapshot
+        from copy import deepcopy
+        snap = build_snapshot([{"month_back":n,"value":1000-n,"unit":"kWh"}
+                               for n in range(1,25)], "2026-11-25T10:00:00Z")
+        snap["stands"][0]["frame4"] = {"cumulative_m3":12.5,"maxima":{
+            "power":{"value":12,"unit":"kW","meter_local_time":"2026-10-31T12:00"}}}
+        before = deepcopy(snap)
+        wb = load_workbook(BytesIO(make_xlsx([],snap)),read_only=True,data_only=True)
+        rows = list(wb["Monthly volume and maxima"].values)
+        self.assertEqual(len(rows),5)
+        self.assertEqual(rows[1][3],12.5)
+        self.assertIsNone(rows[1][4])
+        self.assertEqual(rows[1][7],12)
+        self.assertEqual(list(wb["Månedshistorikk"].values)[1][3],999)
+        self.assertEqual(snap,before)
