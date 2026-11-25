@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from analysis_export import _alias
-from history_model import configured_anchor, build_snapshot, detect_month_shift, estimated_month_at_capture, save_snapshot
+from history_model import migrate_snapshot, configured_anchor, build_snapshot, detect_month_shift, estimated_month_at_capture, save_snapshot
 from mqtt_bridge import device_key
 from monthly_diagnostic import (RestorationError, run as read_months, extract_months,
                                 restore_normal_frame, read_response)
@@ -147,6 +147,39 @@ class HistoryController:
                         str(exc) if isinstance(exc, ValueError) else "see local serial/storage configuration")
             return False
 
+    def migration_status(self, meter_id):
+        try:
+            saved = json.loads(history_file(self.root, meter_id).read_text(encoding="utf-8"))
+            version = saved.get("schema_version")
+            return {2: "pending", 3: "complete"}.get(version, "invalid")
+        except FileNotFoundError:
+            return "no_history"
+        except (OSError, ValueError, AttributeError):
+            return "invalid"
+
+    def migrate(self, meter_id):
+        """Explicit local-only job, serialized against history collection."""
+        with self.lock:
+            if self.state["status"] == "running":
+                raise ValueError("history collection running")
+            with self.registry.lock:
+                if meter_id not in self.registry.selected:
+                    raise ValueError("meter not selected")
+            path = history_file(self.root, meter_id)
+            old = json.loads(path.read_text(encoding="utf-8"))
+            if old.get("schema_version") == 3:
+                raise ValueError("migration already completed")
+            snapshot = migrate_snapshot(old)
+            save_snapshot(path, snapshot)
+            self.state = {"status": "complete", "error": None,
+                          "captured_at_utc": snapshot["captured_at_utc"]}
+        if self.on_complete:
+            try:
+                self.on_complete(meter_id, snapshot)
+            except (OSError, ValueError, ConnectionError, RuntimeError):
+                LOG.warning("Migration saved; MQTT publication pending")
+        return snapshot
+
     def start(self, meter_id):
         if self.config.get("allow_monthly_history") is not True:
             raise ValueError("Aktiver månedshistorikk i appens Configuration først")
@@ -159,6 +192,8 @@ class HistoryController:
         with self.lock:
             if self.state["status"] == "running":
                 raise ValueError("monthly history is already running")
+            if self.migration_status(meter_id) in ("pending", "invalid"):
+                raise ValueError("migrate saved history before collection")
             self.state = {"status": "running", "error": None, "captured_at_utc": None}
             self.worker = threading.Thread(target=self._collect, args=(meter_id, address), daemon=True)
             self.worker.start()
@@ -226,6 +261,7 @@ class HistoryController:
                     previous = None
                 snapshot["rollover_evidence"] = (
                     "confirmed_shift" if detect_month_shift(previous, snapshot) else "not_observed")
+                snapshot = migrate_snapshot(snapshot)
                 save_snapshot(path, snapshot)
                 if self.on_complete:
                     try:

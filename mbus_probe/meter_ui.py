@@ -93,7 +93,7 @@ async function refresh() {
     }
     document.getElementById('scan').disabled = state.scan_status === 'running';
     document.getElementById('auto').disabled = state.scan_status !== 'completed' || state.scan_errors.length > 0 || state.available.filter(m => m.supported).length !== 1;
-    const lists = JSON.stringify([state.available, state.selected, state.history_enabled, state.history.status, state.clock_enabled, state.auto_clock_sync, state.clock.status, state.clock_target]);
+    const lists = JSON.stringify([state.available, state.selected, state.history_enabled, state.history.status, state.clock_enabled, state.auto_clock_sync, state.clock.status, state.clock_target, state.migrations]);
     if (lists !== lastLists) {
       lastLists = lists;
     for (const name of ['available', 'selected']) {
@@ -108,7 +108,16 @@ async function refresh() {
             if (!confirm('Dette bytter midlertidig M-Bus-ramme (CI=50h/03h), leser historikk og gjenoppretter normalrammen. Avlesningen tar noen minutter. Fortsette?')) return;
             await act('/api/history', item.meter_id);
           });
-          hist.disabled = !state.history_enabled || state.history.status === 'running';
+          const migration = state.migrations[item.meter_id];
+          hist.disabled = !state.history_enabled || state.history.status === 'running' || migration === "pending" || migration === "invalid";
+          if (migration === "pending" || migration === "complete") {
+            const migrate = button(migration === "complete" ? "Migration completed (24/24 + 23/23)" : "Migrate historical data", async () => {
+              await act("/api/migrate", item.meter_id);
+              await refreshHistory();
+            });
+            migrate.disabled = migration === "complete" || state.history.status === "running";
+            line.append(migrate);
+          }
           line.append(hist);
           const clock = button('Synkroniser målerklokke', async () => {
             if (!confirm('Sette målerens klokke til systemtid i ' + state.clock_target + '? Dette skriver til måleren. Fortsette?')) return;
@@ -222,6 +231,7 @@ def serve(registry, config, client, bus_lock, stop, port=8099, history_controlle
                 return
             if self.path.rstrip("/").endswith("/api/meters"):
                 self._send(200, {**registry.snapshot(), "history": history_controller.snapshot(),
+                                 "migrations": {r["meter_id"]: history_controller.migration_status(r["meter_id"]) for r in registry.snapshot()["selected"]},
                                  "raw_log": raw_log.status() if raw_log else None,
                                  "history_enabled": config.get("allow_monthly_history", False),
                                  "clock": clock_controller.snapshot(),
@@ -277,7 +287,7 @@ def serve(registry, config, client, bus_lock, stop, port=8099, history_controlle
                 self._send(403, {"error": "ingress required"})
                 return
             route = self.path.rsplit("/", 2)[-1]
-            if route not in ("scan", "select", "auto", "remove", "history", "clock"):
+            if route not in ("scan", "select", "auto", "remove", "history", "clock", "migrate"):
                 self._send(404, {"error": "not found"})
                 return
             try:
@@ -297,6 +307,8 @@ def serve(registry, config, client, bus_lock, stop, port=8099, history_controlle
                     threading.Thread(target=scan_bus, args=(config["serial_port"],
                                      int(config.get("baud", 2400)), registry, bus_lock, stop),
                                      daemon=True).start()
+                elif route == "migrate":
+                    history_controller.migrate(meter_id)
                 elif route == "history":
                     history_controller.start(meter_id)
                 elif route == "clock":

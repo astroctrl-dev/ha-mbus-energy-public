@@ -13,6 +13,7 @@ import threading
 import time
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
+from history_controller import history_file
 
 LOG = logging.getLogger("mbus.maintenance")
 
@@ -71,9 +72,25 @@ class MaintenanceSchedule:
             if local.hour == 23 and not self._done(key):
                 yield key
         if self.config.get("allow_monthly_history") and self.config.get("auto_monthly_history"):
+            try:
+                saved = json.loads(history_file(self.root, meter_id).read_text(encoding="utf-8"))
+                if saved.get("schema_version") != 3:
+                    return
+            except FileNotFoundError:
+                pass
+            except (OSError, ValueError, AttributeError):
+                return
             key = ("history", meter_id, "startup")
             if not self._done(key):
-                yield key
+                try:
+                    saved = json.loads(history_file(self.root, meter_id).read_text(encoding="utf-8"))
+                    complete = len(saved.get("stands", [])) == 24 and len(saved.get("bounded_periods", [])) == 23
+                except (OSError, ValueError, TypeError, AttributeError):
+                    complete = False
+                if complete:
+                    self.completed.add(key)
+                else:
+                    yield key
             key = ("history", meter_id, date)
             if local.day in (1, 2) and local.hour == 1 and not self._done(key):
                 yield key

@@ -130,6 +130,7 @@ def publish_history(client, meter_id, snapshot):
                       "meter_date_status": stand.get("date_source", "unverified"),
                       "archive_position": index,
                       "rollover_evidence": snapshot.get("rollover_evidence", "not_observed")}
+        attributes["read_at_utc"] = stand.get("read_at_utc")
         if stand.get("date_source") in ("estimated_first_of_month", "derived_monthly_set_day") and stand.get("estimated_date"):
             attributes["estimated_date"] = stand["estimated_date"]
             attributes["date_assumption"] = "first_of_month"
@@ -155,6 +156,8 @@ def publish_history(client, meter_id, snapshot):
                       "newer_archive_position": index,
                       "older_archive_position": index + 1,
                       "rollover_evidence": snapshot.get("rollover_evidence", "not_observed")}
+        for field in ("read_at_utc", "newer_read_at_utc", "older_read_at_utc", "estimated_date"):
+            attributes[field] = period.get(field)
         if period.get("date_source") in ("estimated_first_of_month", "derived_monthly_set_day"):
             attributes["estimated_start_date"] = period["estimated_start_date"]
             attributes["estimated_end_date"] = period["estimated_end_date"]

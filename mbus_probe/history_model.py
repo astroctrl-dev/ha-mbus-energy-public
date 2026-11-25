@@ -167,3 +167,46 @@ def save_snapshot(path, snapshot):
     finally:
         if temp.exists():
             temp.unlink()
+
+
+def migrate_snapshot(snapshot):
+    """One-shot v2-to-v3 migration; schema 3 is the permanent completion marker."""
+    from copy import deepcopy
+    if snapshot.get("schema_version") == 3:
+        return snapshot
+    if snapshot.get("schema_version") != 2:
+        raise ValueError("unsupported history schema")
+    result = deepcopy(snapshot)
+    stands = result["stands"]
+    periods = result["bounded_periods"]
+    if len(stands) != 24 or len(periods) != 23:
+        raise ValueError("incomplete history")
+    by_storage = {r["storage"]: r for r in stands}
+    if set(by_storage) != set(range(2, 26)):
+        raise ValueError("invalid historical positions")
+    if {r["newer_storage"] for r in periods} != set(range(2, 25)):
+        raise ValueError("invalid period positions")
+    provenance = result.get("date_provenance") or {}
+    read_at = provenance.get("history_read_at_utc") or result["captured_at_utc"]
+    stamp = datetime.fromisoformat(read_at.replace("Z", "+00:00"))
+    if stamp.tzinfo is None:
+        raise ValueError("missing timezone")
+    for row in stands:
+        if row["month_back"] != row["storage"] - 1 or type(row["cumulative_kwh"]) not in (int, float) or not 0 <= row["cumulative_kwh"] < 1e12:
+            raise ValueError("invalid stand")
+        row["read_at_utc"] = read_at
+    for row in periods:
+        newer = by_storage[row["newer_storage"]]
+        older = by_storage[row["older_storage"]]
+        if (row["older_storage"] != row["newer_storage"] + 1
+                or type(row["period_kwh"]) not in (int, float)
+                or not 0 <= row["period_kwh"] < 1e12
+                or abs(row["period_kwh"] - (newer["cumulative_kwh"] - older["cumulative_kwh"])) > 1e-8):
+            raise ValueError("invalid historical difference")
+        row["read_at_utc"] = newer["read_at_utc"]
+        row["newer_read_at_utc"] = newer["read_at_utc"]
+        row["older_read_at_utc"] = older["read_at_utc"]
+        row["estimated_date"] = newer.get("estimated_date")
+    result["schema_version"] = 3
+    result["migration_read_time_source"] = ("history_read_at_utc" if provenance.get("history_read_at_utc") else "captured_at_utc")
+    return result
