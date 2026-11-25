@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.5.0-beta.2
+
+- Removed separate language and Excel temperature configuration options.
+- App interface and Excel Info use browser language automatically, with English fallback.
+- Excel retains decoded units; Home Assistant entity settings control temperature display.
+- Existing sensor names and identities unchanged. Bulk display-name localization deferred.
+
 ## 2.5.0-beta.1
 
 - English, Norwegian Bokmål, Norwegian Nynorsk and German interface and configuration translations.

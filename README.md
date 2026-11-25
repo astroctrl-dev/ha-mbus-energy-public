@@ -1,6 +1,6 @@
-# Public beta: v2.5.0-beta.1
+# Public beta: v2.5.0-beta.2
 
-The ordinary Home Assistant App Store repository now offers v2.5.0-beta.1, a public prerelease. Back up the existing app and its data before updating. Stable v2.4.0 remains available as a GitHub release and as a backup restore target. Physical validation and existing temperature statistics verification are pending. See [beta release notes](RELEASE-2.5.0-beta.1.md).
+The ordinary Home Assistant App Store repository offers v2.5.0-beta.2, a public prerelease. Back up the existing app and its data before updating. Stable v2.4.0 remains available as a GitHub release and as a backup restore target. See [beta release notes](RELEASE-2.5.0-beta.2.md).
 
 # M-Bus T230 energy metering for Home Assistant
 

@@ -1,10 +1,4 @@
 configuration:
-  language:
-    name: "Sprache"
-    description: "Sprache der App und des Excel-Exports. Auto verwendet die Browsersprache, mit Englisch als Rückfallsprache."
-  temperature_unit:
-    name: "Temperatureinheit in Excel"
-    description: "Celsius (C), Kelvin (K) oder Fahrenheit (F) in Excel. Anzeigeeinheiten der Sensoren in Home Assistant auswählen."
   serial_port:
     name: "Serielles Gerät"
     description: "Das mit dem M-Bus-Master verbundene serielle Gerät auswählen."
