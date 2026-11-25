@@ -68,7 +68,7 @@ class ServiceTests(unittest.TestCase):
             values = poll_once({"meter_id": "00000000", "address": 0}, client)
         self.assertEqual(values["energy"], 12345)
         # 15 Discovery configs + 10 measurements + 5 diagnostics + availability
-        self.assertEqual(len(client.messages), 31)
+        self.assertEqual(len(client.messages), 32)
         states = {topic.rsplit("/", 2)[-2]: payload for topic, payload, _, _
                   in client.messages if topic.endswith("/state")}
         self.assertRegex(states["last_successful_read_utc"],

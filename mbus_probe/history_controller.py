@@ -11,7 +11,8 @@ from pathlib import Path
 from analysis_export import _alias
 from history_model import migrate_snapshot, configured_anchor, build_snapshot, detect_month_shift, estimated_month_at_capture, save_snapshot
 from mqtt_bridge import device_key
-from monthly_diagnostic import (RestorationError, run as read_months, extract_months,
+from rolling_history import merge_history
+from monthly_diagnostic import (RestorationError, run as read_months, extract_months, extract_monthly_set_day,
                                 restore_normal_frame, read_response)
 from mbus_probe import read_one, validate
 from ha_measurements import REQUIRED_SENSORS, select_measurements
@@ -120,8 +121,11 @@ class HistoryController:
                         try:
                             extract_months(frame, meter_id)
                         except ValueError:
-                            raise normal_error from None
-                        LOG.warning("Recovery confirmed historical frame for selected meter")
+                            try:
+                                extract_monthly_set_day(frame, address, meter_id)
+                            except ValueError:
+                                raise normal_error from None
+                        LOG.warning("Recovery confirmed non-normal frame for selected meter")
                         if self.config.get("allow_recovery_interface_reset") is not True:
                             raise ValueError("historical frame confirmed; interface restore disabled")
                         if len(selected) != 1:
@@ -180,7 +184,7 @@ class HistoryController:
                 LOG.warning("Migration saved; MQTT publication pending")
         return snapshot
 
-    def start(self, meter_id):
+    def start(self, meter_id, *, replace=False, settings_only=False):
         if self.config.get("allow_monthly_history") is not True:
             raise ValueError("Aktiver månedshistorikk i appens Configuration først")
         if self.stop.is_set() or self.blocked.is_set():
@@ -195,10 +199,10 @@ class HistoryController:
             if self.migration_status(meter_id) in ("pending", "invalid"):
                 raise ValueError("migrate saved history before collection")
             self.state = {"status": "running", "error": None, "captured_at_utc": None}
-            self.worker = threading.Thread(target=self._collect, args=(meter_id, address), daemon=True)
+            self.worker = threading.Thread(target=self._collect, args=(meter_id, address, replace, settings_only), daemon=True)
             self.worker.start()
 
-    def _collect(self, meter_id, address):
+    def _collect(self, meter_id, address, replace=False, settings_only=False):
         try:
             with self.bus_lock:
                 with self.registry.lock:
@@ -213,8 +217,9 @@ class HistoryController:
                 fd = os.open(self.marker, os.O_WRONLY | os.O_CREAT, 0o600)
                 os.close(fd)
                 try:
+                    kwargs = {"settings_only": True} if settings_only else {}
                     result = self.reader(self.config["serial_port"], int(self.config.get("baud", 2400)),
-                                         address, meter_id)
+                                         address, meter_id, **kwargs)
                     # The reader returns only after a verified normal frame.
                     self.marker.unlink()
                 except Exception:
@@ -227,6 +232,24 @@ class HistoryController:
                 else:
                     months, observation, history_read_at = result, None, None
                 captured_at = datetime.now(timezone.utc).isoformat()
+                if settings_only:
+                    if not observation or not observation.get("monthly_set_day"):
+                        raise ValueError("monthly storage configuration unavailable")
+                    path = history_file(self.root, meter_id)
+                    saved = json.loads(path.read_text(encoding="utf-8"))
+                    if saved.get("schema_version") != 3:
+                        raise ValueError("migration required")
+                    saved["monthly_set_day"] = observation["monthly_set_day"]
+                    saved["configuration_read_at_utc"] = captured_at
+                    save_snapshot(path, saved)
+                    if self.on_complete:
+                        try:
+                            self.on_complete(meter_id, saved)
+                        except (OSError, ValueError, ConnectionError):
+                            LOG.warning("Configuration saved but MQTT publication failed")
+                    with self.lock:
+                        self.state = {"status": "complete", "error": None, "captured_at_utc": saved["captured_at_utc"]}
+                    return
                 trust_file = self.root / ("clock-trust-" + device_key(meter_id) + ".json")
                 try:
                     trust_record = json.loads(trust_file.read_text(encoding="utf-8"))
@@ -243,6 +266,7 @@ class HistoryController:
                     estimated_month = None
                 snapshot = build_snapshot(months, captured_at, estimated_month, configured)
                 snapshot["monthly_set_day"] = observation.get("monthly_set_day") if observation else None
+                snapshot["configuration_read_at_utc"] = captured_at
                 snapshot["date_provenance"] = {
                     "history_read_at_utc": history_read_at,
                     "normal_read_at_utc": observation.get("last_successful_read_utc") if observation else None,
@@ -261,7 +285,8 @@ class HistoryController:
                     previous = None
                 snapshot["rollover_evidence"] = (
                     "confirmed_shift" if detect_month_shift(previous, snapshot) else "not_observed")
-                snapshot = migrate_snapshot(snapshot)
+                snapshot = merge_history(previous, snapshot, history_read_at or captured_at, replace=replace)
+                snapshot["schema_version"] = 3
                 save_snapshot(path, snapshot)
                 if self.on_complete:
                     try:

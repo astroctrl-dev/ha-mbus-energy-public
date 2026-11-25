@@ -14,6 +14,7 @@ from poll_schedule import next_aligned_poll_wait
 from raw_telegram_log import RawLog, install
 from bus_timing import BusTiming, install_bus_timing, MissedSlot, poll_slot, slot_tolerance, slot_open
 from maintenance_schedule import MaintenanceSchedule
+from clock_model import assess_clock
 
 from ha_measurements import SENSORS, select_measurements
 from mbus_probe import read_one, validate
@@ -120,7 +121,12 @@ def poll_once(config, client):
             "to avoid flooding the log.", int(config.get("address", 0))
         )
     read_at_utc = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
-    publish_reading(client, decoded, config["meter_id"], read_at_utc=read_at_utc)
+    clock_attributes = assess_clock(decoded, read_at_utc, config.get("clock_timezone", "Europe/Oslo"))
+    publish_reading(client, decoded, config["meter_id"], read_at_utc=read_at_utc,
+                    clock_attributes=clock_attributes)
+    observer = config.get("_clock_observer")
+    if observer:
+        observer(config["meter_id"], clock_attributes)
     if not config.get('log_measurement_data', True):
         return selected
     try:
@@ -195,6 +201,9 @@ def run(config, client, registry=None, bus_lock=None, history_controller=None,
         attempted_meters.intersection_update(row['meter_id'] for row in selections)
         valid_meter_ids = []
         for row in selections:
+            if history_controller and hasattr(history_controller, "migration_status") and history_controller.migration_status(row["meter_id"]) in ("pending", "invalid"):
+                attempted_meters.add(row["meter_id"])
+                continue
             meter_config = dict(config, meter_id=row["meter_id"], address=row["address"])
             try:
                 with bus_lock if bus_lock else nullcontext():
@@ -302,6 +311,7 @@ def main():
     install(raw_log)
     server = serve(registry, config, client, bus_lock, STOP, raw_log=raw_log)
     maintenance = MaintenanceSchedule(config, server.clock_controller, server.history_controller, STOP)
+    config["_clock_observer"] = maintenance.observe_clock
     def valid_round(meter_ids):
         maintenance.on_valid_round(meter_ids)
     try:

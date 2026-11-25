@@ -312,6 +312,8 @@ def serve(registry, config, client, bus_lock, stop, port=8099, history_controlle
                 elif route == "history":
                     history_controller.start(meter_id)
                 elif route == "clock":
+                    if history_controller.migration_status(meter_id) in ("pending", "invalid"):
+                        raise ValueError("migrate saved history before clock synchronization")
                     if data.get("confirm") is not True:
                         raise ValueError("clock write requires explicit confirmation")
                     clock_controller.start(meter_id)

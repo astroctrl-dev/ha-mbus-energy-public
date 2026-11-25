@@ -63,6 +63,8 @@ def discovery_messages(meter_id):
             "availability_mode": "all",
             "entity_category": "diagnostic",
         }
+        if kind == "meter_local_time":
+            payload["json_attributes_topic"] = f"mbus/t230/{key}/{kind}/attributes"
         if kind == "last_successful_read_utc":
             payload["device_class"] = "timestamp"
         messages.append((topic, json.dumps(payload), True))
@@ -121,6 +123,19 @@ def publish_history(client, meter_id, snapshot):
         if result.rc:
             raise ConnectionError("MQTT history discovery publish failed")
         result.wait_for_publish(timeout=5)
+    setting = snapshot.get("monthly_set_day")
+    if isinstance(setting, dict) and all(type(setting.get(k)) is int for k in ("day", "hour", "minute")):
+        kind = "monthly_storage_time"
+        topic = f"mbus/t230/{key}/{kind}/state"
+        payload = {"name": "Monthly storage time", "unique_id": f"mbus_t230_{key}_{kind}",
+                   "device": {"identifiers": [f"mbus_t230_{key}"]}, "state_topic": topic,
+                   "entity_category": "diagnostic", "availability": [{"topic": availability_topic(key)}, {"topic": BRIDGE_AVAILABILITY}], "availability_mode": "all"}
+        for target, value, retain in ((f"homeassistant/sensor/mbus_t230_{key}_{kind}/config", json.dumps(payload), True),
+                                      (topic, f"Day {setting['day']}, {setting['hour']:02d}:{setting['minute']:02d}", True)):
+            result = client.publish(target, value, qos=1, retain=retain)
+            if result.rc:
+                raise ConnectionError("MQTT configuration publish failed")
+            result.wait_for_publish(timeout=5)
     for index in range(1, 25):
         value = by_stand[index]["cumulative_kwh"]
         if type(value) not in (int, float) or value < 0:
@@ -130,7 +145,8 @@ def publish_history(client, meter_id, snapshot):
                       "meter_date_status": stand.get("date_source", "unverified"),
                       "archive_position": index,
                       "rollover_evidence": snapshot.get("rollover_evidence", "not_observed")}
-        attributes["read_at_utc"] = stand.get("read_at_utc")
+        attributes["meter_storage_date"] = stand.get("meter_date") or stand.get("estimated_date")
+        attributes["read_at_utc"] = stand.get("read_at_utc", snapshot.get("date_provenance", {}).get("history_read_at_utc"))
         if stand.get("date_source") in ("estimated_first_of_month", "derived_monthly_set_day") and stand.get("estimated_date"):
             attributes["estimated_date"] = stand["estimated_date"]
             attributes["date_assumption"] = "first_of_month"
@@ -156,8 +172,12 @@ def publish_history(client, meter_id, snapshot):
                       "newer_archive_position": index,
                       "older_archive_position": index + 1,
                       "rollover_evidence": snapshot.get("rollover_evidence", "not_observed")}
-        for field in ("read_at_utc", "newer_read_at_utc", "older_read_at_utc", "estimated_date"):
-            attributes[field] = period.get(field)
+        attributes["meter_storage_date"] = period.get("meter_end_date") or period.get("estimated_end_date")
+        attributes["meter_storage_start_date"] = period.get("meter_start_date") or period.get("estimated_start_date")
+        attributes["meter_storage_end_date"] = attributes["meter_storage_date"]
+        attributes["estimated_date"] = period.get("estimated_date", period.get("estimated_end_date"))
+        for field in ("read_at_utc", "newer_read_at_utc", "older_read_at_utc"):
+            attributes[field] = period.get(field, snapshot.get("date_provenance", {}).get("history_read_at_utc"))
         if period.get("date_source") in ("estimated_first_of_month", "derived_monthly_set_day"):
             attributes["estimated_start_date"] = period["estimated_start_date"]
             attributes["estimated_end_date"] = period["estimated_end_date"]
@@ -179,7 +199,7 @@ def publish_history(client, meter_id, snapshot):
         result.wait_for_publish(timeout=5)
 
 
-def publish_reading(client, decoded, meter_id, read_at_utc=None):
+def publish_reading(client, decoded, meter_id, read_at_utc=None, clock_attributes=None):
     """Return selected values; availability goes online only after state messages."""
     values = select_measurements(decoded, meter_id)
     key = device_key(meter_id)
@@ -216,6 +236,12 @@ def publish_reading(client, decoded, meter_id, read_at_utc=None):
                                 qos=1, retain=False)
         if result.rc:
             raise ConnectionError("MQTT diagnostic publish failed")
+        result.wait_for_publish(timeout=5)
+    if clock_attributes is not None:
+        result = client.publish(f"mbus/t230/{key}/meter_local_time/attributes",
+                                json.dumps(clock_attributes), qos=1, retain=False)
+        if result.rc:
+            raise ConnectionError("MQTT clock attributes publish failed")
         result.wait_for_publish(timeout=5)
     result = client.publish(availability_topic(key), "online", qos=1, retain=True)
     if result.rc:

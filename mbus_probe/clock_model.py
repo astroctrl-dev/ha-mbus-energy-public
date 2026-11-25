@@ -24,3 +24,22 @@ def clock_observation(decoded, read_at):
             "meter_summer_time": r["summer_time"],
             "last_successful_read_utc": stamp.astimezone(timezone.utc).isoformat(),
             "clock_offset_seconds": None}
+
+
+def assess_clock(decoded, read_at, zone_name):
+    """Compare meter wall time to configured zone, without claiming meter UTC."""
+    from zoneinfo import ZoneInfo
+    try:
+        obs = clock_observation(decoded, read_at)
+        local = datetime.fromisoformat(read_at.replace("Z", "+00:00")).astimezone(ZoneInfo(zone_name))
+        meter = datetime.fromisoformat(obs["meter_local_time"])
+        if meter.tzinfo is not None:
+            raise ValueError("unexpected meter offset")
+        offset = int((meter - local.replace(tzinfo=None)).total_seconds())
+        dst_mismatch = obs["meter_summer_time"] != bool(local.dst())
+        return {"clock_offset_seconds": offset,
+                "clock_out_of_sync": abs(offset) > 120 or dst_mismatch,
+                "clock_dst_mismatch": dst_mismatch}
+    except (ValueError, TypeError, KeyError):
+        return {"clock_offset_seconds": None, "clock_out_of_sync": None,
+                "clock_dst_mismatch": None}

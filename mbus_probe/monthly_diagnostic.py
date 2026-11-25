@@ -109,7 +109,7 @@ def verify_normal_frame(frame, address, expected_id):
 
 
 @operation("monthly_history")
-def run(port, baud, address, meter_id, timeout=5, *, read_set_day=False):
+def run(port, baud, address, meter_id, timeout=5, *, read_set_day=False, settings_only=False):
     import serial
     if baud not in (300, 2400):
         raise ValueError("T230 documented baud is 300 or 2400")
@@ -135,7 +135,7 @@ def run(port, baud, address, meter_id, timeout=5, *, read_set_day=False):
 
         try:
             selected = True  # Attempt restore even if write/ACK fails.
-            if read_set_day:
+            if read_set_day or settings_only:
                 LOG.info("Monthly history: selecting frame 2")
                 send(select_frame_two(address))
                 if read_response(ser) != b"\xe5":
@@ -150,20 +150,21 @@ def run(port, baud, address, meter_id, timeout=5, *, read_set_day=False):
                              set_day["day"], set_day["hour"], set_day["minute"])
                 except ValueError:
                     LOG.warning("Monthly set day unavailable; no derived dates")
-            LOG.info("Monthly history: selecting historical frame")
-            send(select_frame_three(address))
-            if read_response(ser) != b"\xe5":
-                raise ValueError("frame selection was not acknowledged")
-            # Battery-powered T230: leave more than one minute before each read.
-            req = bytes((0x10, 0x5B, address, (0x5B + address) & 255, 0x16))
-            LOG.info("Monthly history: reading historical frame")
-            send(req)
-            frame = read_response(ser)
-            history_read_at_utc = datetime.now(timezone.utc).isoformat()
-            header = validate(frame)
-            if header.get("address") != address or header.get("control") not in (8, 24):
-                raise ValueError("monthly response address/control mismatch")
-            months = extract_months(frame, meter_id)
+            if not settings_only:
+                LOG.info("Monthly history: selecting historical frame")
+                send(select_frame_three(address))
+                if read_response(ser) != b"\xe5":
+                    raise ValueError("frame selection was not acknowledged")
+                # Battery-powered T230: leave more than one minute before each read.
+                req = bytes((0x10, 0x5B, address, (0x5B + address) & 255, 0x16))
+                LOG.info("Monthly history: reading historical frame")
+                send(req)
+                frame = read_response(ser)
+                history_read_at_utc = datetime.now(timezone.utc).isoformat()
+                header = validate(frame)
+                if header.get("address") != address or header.get("control") not in (8, 24):
+                    raise ValueError("monthly response address/control mismatch")
+                months = extract_months(frame, meter_id)
         finally:
             if selected:
                 try:
@@ -189,7 +190,7 @@ def run(port, baud, address, meter_id, timeout=5, *, read_set_day=False):
                 except Exception as exc:
                     LOG.warning("Monthly history restore failed: %s", str(exc) if isinstance(exc, ValueError) else type(exc).__name__)
                     raise RestorationError("normal frame not verified; stop polling") from exc
-        if read_set_day and normal_clock is not None:
+        if (read_set_day or settings_only) and normal_clock is not None:
             normal_clock = dict(normal_clock, monthly_set_day=set_day)
         return months, normal_clock, history_read_at_utc
 
