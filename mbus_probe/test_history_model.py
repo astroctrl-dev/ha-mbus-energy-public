@@ -119,3 +119,22 @@ class HistoryModelTests(unittest.TestCase):
             build_snapshot(bad, "2026-11-23T01:00:00Z")
         with self.assertRaisesRegex(ValueError, "timezone"):
             build_snapshot(self.months, "2026-11-23T01:00:00")
+
+
+class ConfiguredDateTests(unittest.TestCase):
+    def test_configured_dates(self):
+        from history_model import configured_anchor, build_snapshot
+        obs = {"monthly_set_day": {"day": 15, "hour": 6, "minute": 30},
+               "meter_local_time": "2026-11-25T08:00",
+               "meter_summer_time": False,
+               "last_successful_read_utc": "2026-11-25T07:00:00+00:00"}
+        anchor = configured_anchor(obs, "2026-11-25T06:58:00+00:00", "Europe/Oslo")
+        months = [{"month_back": n, "value": 1000-n, "unit": "kWh"} for n in range(1,25)]
+        snapshot = build_snapshot(months, "2026-11-25T07:01:00+00:00", configured=anchor)
+        self.assertEqual(snapshot["stands"][0]["estimated_date"], "2026-11-15T06:30")
+        self.assertEqual(snapshot["stands"][-1]["estimated_date"], "2024-12-15T06:30")
+        self.assertIsNone(snapshot["stands"][0]["meter_date"])
+        self.assertEqual(snapshot["stands"][0]["date_source"], "derived_monthly_set_day")
+        obs["monthly_set_day"]["day"] = 28
+        anchor = configured_anchor(obs, "2026-11-25T06:58:00+00:00", "Europe/Oslo")
+        self.assertEqual(anchor.isoformat(timespec="minutes"), "2026-10-28T06:30")

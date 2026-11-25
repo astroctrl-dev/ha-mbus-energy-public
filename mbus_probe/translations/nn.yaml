@@ -1,4 +1,10 @@
 configuration:
+  log_measurement_data:
+    name: "Logg måledata"
+    description: "Lagre dekoda normalavlesingar for Excel. Eksisterande filer blir tekne vare på."
+  raw_telegram_logging:
+    name: "Logg råtelegram"
+    description: "Lagre rå TX/RX lokalt. Kan innehalde målar-ID og forbruk. Start appen på nytt."
   serial_port:
     name: "Seriell eining"
     description: "Vel den serielle eininga som er kopla til M-Bus-masteren."

@@ -94,6 +94,9 @@ def load_config(path="/data/options.json"):
     delay = config.get("seconds_before_full_hour", 5)
     if isinstance(delay, bool) or not isinstance(delay, int) or not 0 <= delay <= 300:
         raise ValueError("seconds_before_full_hour must be an integer 0..300")
+    for key in ('log_measurement_data', 'raw_telegram_logging'):
+        if not isinstance(config.get(key, key == 'log_measurement_data'), bool):
+            raise ValueError(key + ' must be boolean')
     return config
 
 
@@ -118,6 +121,8 @@ def poll_once(config, client):
         )
     read_at_utc = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
     publish_reading(client, decoded, config["meter_id"], read_at_utc=read_at_utc)
+    if not config.get('log_measurement_data', True):
+        return selected
     try:
         sample = make_sample(decoded, config["meter_id"],
                              read_at_utc,
@@ -274,6 +279,7 @@ def main():
                    keepalive=60)
     client.loop_start()
     raw_log = RawLog()
+    raw_log.set_enabled(config.get('raw_telegram_logging', False))
     install(raw_log)
     server = serve(registry, config, client, bus_lock, STOP, raw_log=raw_log)
     maintenance = MaintenanceSchedule(config, server.clock_controller, server.history_controller, STOP)

@@ -1,3 +1,9 @@
+# 2.6.0-beta.3
+
+- Read monthly set-day configuration before frame 3; derive historical timestamps conservatively.
+- Separate measurement and raw logging configuration; raw download as text.
+- History retrieval takes about six minutes per meter. Physical frame-2 verification pending.
+
 # Changelog
 
 ## 2.6.0-beta.2

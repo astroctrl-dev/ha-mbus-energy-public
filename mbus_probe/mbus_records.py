@@ -113,7 +113,11 @@ def decode_records(data):
             minute, hour, day, month = (raw[0] & 63, raw[1] & 31,
                                          raw[2] & 31, raw[3] & 15)
             year = ((raw[2] >> 5) & 7) | ((raw[3] >> 4) << 3)
-            if year == 127 and record["storage"] == 510:
+            if (dif == 0xc4 and difes == [0x8f, 0x0f] and vif == 0x6d
+                    and year == 127 and month == 15 and not raw[0] & 0x80
+                    and 1 <= day <= 31 and hour < 24 and minute < 60):
+                record.update(kind="monthly_set_day", day=day, hour=hour, minute=minute)
+            elif year == 127 and record["storage"] == 510:
                 record.update(kind="annual_set_day", month=month, day=day)
             elif raw[0] & 0x80 or year > 99:
                 record["kind"] = "invalid_meter_time"

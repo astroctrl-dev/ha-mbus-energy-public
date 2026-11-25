@@ -1,6 +1,6 @@
-# Public beta: v2.6.0-beta.2
+# Public beta: v2.6.0-beta.3
 
-The ordinary App Store channel currently offers an opt-in raw diagnostics beta. Back up before updating. Stable v2.5.0 remains the latest stable release. [Beta notes](RELEASE-2.6.0-beta.2.md).
+The ordinary App Store channel currently offers an beta with monthly set-day retrieval and configurable logging. Back up before updating. Stable v2.5.0 remains the latest stable release. [Beta notes](RELEASE-2.6.0-beta.3.md).
 
 # Latest stable release: v2.5.0
 
@@ -34,7 +34,7 @@ Open **M-Bus T230 energimåling**, select **Install**, configure the serial port
 
 The seven existing measurement sensors and status diagnostics are preserved. Since 2.1.0, optional cumulative operating, flow and non-measuring hour counters are also exposed. Signed power is supported; an invalid record affects only its sensor. Meter local time, daylight-saving flag and last successful reading are shown separately, without assuming a UTC offset for meter time.
 
-Enable `allow_monthly_history` and use **Hent månedshistorikk** in the web UI. The app pauses regular polling, selects the history frame, reads 24 cumulative energy readings and restores and verifies the normal frame before resuming. Unverified restoration blocks regular polling. Complete history contains 24 readings and 23 differences. Estimated first-of-month dates require verified clocks and retrieval outside the first 15 minutes of a new month; they are not measured billing dates. History is not added as current Home Assistant Energy consumption.
+Enable `allow_monthly_history` and use **Hent månedshistorikk** in the web UI. The app pauses regular polling, selects frame 2, reads monthly set-day configuration, selects frame 3, reads 24 cumulative energy readings and restores and verifies the normal frame before resuming. Unverified restoration blocks regular polling. Complete history contains 24 readings and 23 differences. Allow about six minutes per meter. Derived dates use current meter configuration and assume it has not changed. Ambiguous dates and days 29–31 remain unverified. History is not added as current Home Assistant Energy consumption.
 
 The analysis download (**Last ned analyse (.xlsx)**) exports stored validated readings and available history without querying the meter. An alias replaces meter ID; raw telegrams and credentials are omitted. Review the actual measurement data before sharing.
 

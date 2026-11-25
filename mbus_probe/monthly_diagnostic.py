@@ -23,6 +23,26 @@ class RestorationError(RuntimeError):
     """Normal frame was not verified. Ordinary polling must remain stopped."""
 
 
+def select_frame_two(address):
+    if not 0 <= address <= 250:
+        raise ValueError("primary address outside 0..250")
+    data = bytes((0x53, address, 0x50, 0x02))
+    return bytes((0x68, 0x04, 0x04, 0x68)) + data + bytes((sum(data) & 255, 0x16))
+
+
+def extract_monthly_set_day(frame, address, meter_id):
+    decoded = validate(frame)
+    if (decoded.get('type') != 'long' or decoded.get('ci') != 0x72
+            or decoded.get('address') != address or decoded.get('control') not in (8, 24)
+            or decoded.get('meter_id') != meter_id or decoded.get('manufacturer') != 'LUG'
+            or decoded.get('medium_code') != 4 or decoded.get('status') not in (0, 0x10)):
+        raise ValueError('frame-2 identity or status mismatch')
+    records = [r for r in decoded['records'] if r.get('kind') == 'monthly_set_day']
+    if len(records) != 1:
+        raise ValueError('monthly set day absent or ambiguous')
+    return {k: records[0][k] for k in ('day', 'hour', 'minute')}
+
+
 def select_frame_three(address):
     if not 0 <= address <= 250:
         raise ValueError("primary address outside 0..250")
@@ -89,7 +109,7 @@ def verify_normal_frame(frame, address, expected_id):
 
 
 @operation("monthly_history")
-def run(port, baud, address, meter_id, timeout=5):
+def run(port, baud, address, meter_id, timeout=5, *, read_set_day=False):
     import serial
     if baud not in (300, 2400):
         raise ValueError("T230 documented baud is 300 or 2400")
@@ -102,6 +122,7 @@ def run(port, baud, address, meter_id, timeout=5):
         last_request_at = None
         months = None
         normal_clock = None
+        set_day = None
         history_read_at_utc = None
         def send(command):
             nonlocal last_request_at
@@ -114,6 +135,21 @@ def run(port, baud, address, meter_id, timeout=5):
 
         try:
             selected = True  # Attempt restore even if write/ACK fails.
+            if read_set_day:
+                LOG.info("Monthly history: selecting frame 2")
+                send(select_frame_two(address))
+                if read_response(ser) != b"\xe5":
+                    raise ValueError("frame-2 selection was not acknowledged")
+                req = bytes((0x10, 0x5B, address, (0x5B + address) & 255, 0x16))
+                LOG.info("Monthly history: reading monthly set day")
+                send(req)
+                config_frame = read_response(ser)
+                try:
+                    set_day = extract_monthly_set_day(config_frame, address, meter_id)
+                    LOG.info("Monthly set day: %d at %02d:%02d",
+                             set_day["day"], set_day["hour"], set_day["minute"])
+                except ValueError:
+                    LOG.warning("Monthly set day unavailable; no derived dates")
             LOG.info("Monthly history: selecting historical frame")
             send(select_frame_three(address))
             if read_response(ser) != b"\xe5":
@@ -153,6 +189,8 @@ def run(port, baud, address, meter_id, timeout=5):
                 except Exception as exc:
                     LOG.warning("Monthly history restore failed: %s", str(exc) if isinstance(exc, ValueError) else type(exc).__name__)
                     raise RestorationError("normal frame not verified; stop polling") from exc
+        if read_set_day and normal_clock is not None:
+            normal_clock = dict(normal_clock, monthly_set_day=set_day)
         return months, normal_clock, history_read_at_utc
 
 

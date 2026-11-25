@@ -95,6 +95,26 @@ class HistorySequenceTests(unittest.TestCase):
                 self.assertTrue(all(b-a >= 61 for a,b in zip(stamps, stamps[1:])))
                 self.assertGreaterEqual(clock[0]-stamps[-1], 61)
 
+    def test_optional_frame_two_preserves_restore_sequence(self):
+        serial = SerialScript(b"\xe5" + HISTORY_FRAME + b"\xe5" + HISTORY_FRAME
+                              + b"\xe5" + NORMAL_FRAME)
+        module = types.SimpleNamespace(Serial=lambda *_a, **_kw: serial)
+        set_day = {"day": 1, "hour": 0, "minute": 0}
+        with patch.dict(sys.modules, {"serial": module}), \
+             patch("monthly_diagnostic.validate", return_value=self.decoded), \
+             patch("monthly_diagnostic.extract_monthly_set_day", return_value=set_day), \
+             patch("monthly_diagnostic.verify_normal_frame", return_value={"energy": 1}), \
+             patch("monthly_diagnostic.clock_observation", return_value={"meter_local_time": "2026-11-25T02:39"}), \
+             patch("monthly_diagnostic.time.sleep") as sleep:
+            months, clock, _ = run("/dev/test", 2400, 0, "00000000", read_set_day=True)
+        self.assertEqual(len(months), 24)
+        self.assertEqual(clock["monthly_set_day"], set_day)
+        self.assertEqual(len(serial.writes), 6)
+        self.assertEqual(serial.writes[0], bytes.fromhex("68 04 04 68 53 00 50 02 a5 16"))
+        self.assertEqual(serial.writes[2], bytes.fromhex("68 04 04 68 53 00 50 03 a6 16"))
+        self.assertEqual(serial.writes[4], bytes.fromhex("68 03 03 68 53 00 50 a3 16"))
+        self.assertEqual(sleep.call_count, 6)
+
     def test_failed_restore_never_returns_months(self):
         serial = SerialScript(b"\xe5" + HISTORY_FRAME + b"\x00")
         module = types.SimpleNamespace(Serial=lambda *_a, **_kw: serial)

@@ -1,4 +1,10 @@
 configuration:
+  log_measurement_data:
+    name: "Log measurement data"
+    description: "Save decoded normal readings for Excel export; existing files are retained."
+  raw_telegram_logging:
+    name: "Log raw telegrams"
+    description: "Save raw TX/RX locally. May contain meter identifiers and consumption. Restart to apply."
   serial_port:
     name: "Serial device"
     description: "Select the serial device connected to the M-Bus master."

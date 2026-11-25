@@ -1,7 +1,8 @@
 """Validated frame-3 snapshot model. No HA Energy backfill or meter date inference."""
 import json
 import os
-from datetime import datetime, timezone, date
+from datetime import datetime, timezone, date, timedelta
+from calendar import monthrange
 from zoneinfo import ZoneInfo
 from pathlib import Path
 
@@ -50,7 +51,48 @@ def _month_start(anchor, position):
     return date(index // 12, index % 12 + 1, 1).isoformat()
 
 
-def build_snapshot(months, captured_at, estimated_month=None):
+def configured_anchor(observation, history_read_at, zone_name):
+    """Derive latest completed set day from meter wall clock; avoid ambiguous rollover."""
+    try:
+        setting = observation["monthly_set_day"]
+        day, hour, minute = (setting[k] for k in ("day", "hour", "minute"))
+        if not (1 <= day <= 31 and 0 <= hour < 24 and 0 <= minute < 60):
+            return None
+        meter = datetime.fromisoformat(observation["meter_local_time"])
+        read_at = datetime.fromisoformat(observation["last_successful_read_utc"])
+        history_at = datetime.fromisoformat(history_read_at)
+        elapsed = read_at - history_at
+        zone = ZoneInfo(zone_name)
+        if not 0 <= elapsed.total_seconds() <= 600 or meter.tzinfo is not None:
+            return None
+        if read_at.astimezone(zone).utcoffset() != history_at.astimezone(zone).utcoffset():
+            return None
+        if abs((read_at.astimezone(zone).replace(tzinfo=None) - meter).total_seconds()) > 120:
+            return None
+        if observation["meter_summer_time"] != bool(read_at.astimezone(zone).dst()):
+            return None
+        at_history = meter - elapsed
+        # Days beyond the end of shorter months are instrument-dependent.
+        # Do not infer those dates until the meter's convention is verified.
+        if day > 28:
+            return None
+        anchor = at_history.replace(day=day, hour=hour, minute=minute, second=0, microsecond=0)
+        if abs((at_history - anchor).total_seconds()) < 900:
+            return None
+        if at_history < anchor:
+            index = anchor.year * 12 + anchor.month - 2
+            anchor = anchor.replace(year=index // 12, month=index % 12 + 1)
+        return anchor
+    except (KeyError, ValueError, TypeError, AttributeError):
+        return None
+
+
+def configured_timestamp(anchor, position):
+    index = anchor.year * 12 + anchor.month - position
+    return anchor.replace(year=index // 12, month=index % 12 + 1).isoformat(timespec="minutes")
+
+
+def build_snapshot(months, captured_at, estimated_month=None, configured=None):
     """Return 24 cumulative kWh stands and 23 bounded period differences."""
     stamp = datetime.fromisoformat(captured_at.replace("Z", "+00:00"))
     if stamp.tzinfo is None or stamp.utcoffset() is None:
@@ -86,8 +128,16 @@ def build_snapshot(months, captured_at, estimated_month=None):
                         "estimated_start_date": _month_start(estimated_month, n + 1) if estimated_month else None,
                         "estimated_end_date": _month_start(estimated_month, n) if estimated_month else None,
                         "date_source": "estimated_first_of_month" if estimated_month else "unverified"})
+    if configured is not None:
+        for n, row in enumerate(stands, 1):
+            row.update(estimated_date=configured_timestamp(configured, n),
+                       date_source="derived_monthly_set_day")
+        for n, row in enumerate(periods, 1):
+            row.update(estimated_start_date=configured_timestamp(configured, n + 1),
+                       estimated_end_date=configured_timestamp(configured, n),
+                       date_source="derived_monthly_set_day")
     return {"schema_version": 2, "source": "T230 frame 3",
-            "date_assumption": "first of month inferred from capture clocks; no frame-4 storage time", "captured_at_utc": stamp.astimezone(timezone.utc).isoformat(),
+            "date_assumption": ("current meter set day assumed unchanged; no frame-4 storage time" if configured else "first of month inferred from capture clocks; no frame-4 storage time"), "captured_at_utc": stamp.astimezone(timezone.utc).isoformat(),
             "stands": stands, "bounded_periods": periods}
 
 

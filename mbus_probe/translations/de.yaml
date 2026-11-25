@@ -1,4 +1,10 @@
 configuration:
+  log_measurement_data:
+    name: "Messdaten protokollieren"
+    description: "Dekodierte Messwerte für Excel speichern. Vorhandene Dateien bleiben erhalten."
+  raw_telegram_logging:
+    name: "Rohtelegramme protokollieren"
+    description: "TX/RX lokal speichern. Kann Zählerkennungen und Verbrauch enthalten. App neu starten."
   serial_port:
     name: "Serielles Gerät"
     description: "Das mit dem M-Bus-Master verbundene serielle Gerät auswählen."
