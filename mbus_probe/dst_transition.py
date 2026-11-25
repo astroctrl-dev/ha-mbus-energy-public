@@ -9,34 +9,42 @@ from zoneinfo import ZoneInfo
 
 
 def latest_transition(now, zone_name):
-    """Most recent offset/DST change whose local noon has passed."""
+    """Most recent actual DST offset transition, located in UTC."""
     if now.tzinfo is None or now.utcoffset() is None:
         raise ValueError("aware time required")
     zone = ZoneInfo(zone_name)
-    local = now.astimezone(zone)
-    day = local.date()
-    if local.hour < 12:
-        day -= timedelta(days=1)
-    for _ in range(370):
-        noon = datetime.combine(day, datetime.min.time().replace(hour=12), zone)
-        prior = noon - timedelta(days=1)
-        shift = int((noon.utcoffset() - prior.utcoffset()).total_seconds())
-        if shift and noon.dst() != prior.dst():
-            return {"key": zone_name + ":" + day.isoformat(),
+    end = int(now.timestamp())
+    def at(t):
+        return datetime.fromtimestamp(t, timezone.utc).astimezone(zone)
+    for _ in range(371):
+        start = end - 86400
+        prior, current = at(start), at(end)
+        if prior.utcoffset() != current.utcoffset() and prior.dst() != current.dst():
+            lo, hi = start, end
+            while hi - lo > 1:
+                mid = (lo + hi) // 2
+                if at(mid).utcoffset() == prior.utcoffset():
+                    lo = mid
+                else:
+                    hi = mid
+            after = at(hi)
+            shift = int((after.utcoffset() - prior.utcoffset()).total_seconds())
+            return {"key": zone_name + ":" + after.date().isoformat(),
                     "direction": "forward" if shift > 0 else "backward",
-                    "shift_seconds": shift, "expected_dst": bool(noon.dst())}
-        day -= timedelta(days=1)
+                    "shift_seconds": shift, "expected_dst": bool(after.dst()),
+                    "at_utc": datetime.fromtimestamp(hi, timezone.utc).isoformat()}
+        end = start
     return None
 
 
 def evaluate_transition(transition, offset, mismatch, tolerance=120):
     """Offset is meter minus configured wall time. Unknown is not success."""
-    if type(offset) not in (int, float) or type(mismatch) is not bool:
+    if type(offset) not in (int, float):
         return "unknown"
     if not float("-inf") < offset < float("inf"):
         return "unknown"
     if abs(offset) <= tolerance:
-        return "failed" if mismatch else "independent_success"
+        return "independent_success"
     if abs(offset + transition["shift_seconds"]) <= 300:
         return "seasonal_correction_required"
     return "failed"

@@ -56,31 +56,9 @@ def sync_once(port, baud, address, meter_id, zone_name, *, reader=read_one,
               serial_factory=None, on_write=None, auto=False, allow_auto_write=False, use_dst=True, test_dst=False, force_dst=None, alternate=False, seasonal_shift=None):
     """Read, write once, then read back. An ACK alone never counts as success."""
     if test_dst:
-        if auto or force_dst is not None:
-            raise ValueError("DST test is manual only")
-        kwargs = dict(reader=reader, sleep=sleep, now=now, serial_factory=serial_factory,
-                      on_write=on_write, use_dst=use_dst)
-        results = {}
-        errors = {}
-        try:
-            for bit in (True, False):
-                try:
-                    result = sync_once(port, baud, address, meter_id, zone_name,
-                                       force_dst=bit, alternate=True, **kwargs)
-                    results[str(int(bit))] = result["dst_readback"] == bit
-                except Exception as exc:
-                    results[str(int(bit))] = False
-                    errors[str(int(bit))] = str(exc) if isinstance(exc, ValueError) else type(exc).__name__
-                    LOG.warning("Alternative DST test bit %d failed: %s", bit, errors[str(int(bit))])
-                    # Stop further experimental writes after an uncertain result.
-                    break
-        finally:
-            restored = sync_once(port, baud, address, meter_id, zone_name, **kwargs)
-        restored.update(dst_test=True, dst_test_results=results, dst_test_errors=errors,
-                        dst_test_command="04 ED 00", clock_restored=True)
-        return restored
-    if (force_dst is not None or alternate) and auto:
-        raise ValueError("forced DST is manual only")
+        raise ValueError("Experimental DST writes are retired")
+    if force_dst is not None or alternate:
+        raise ValueError("Experimental DST writes are retired")
     if baud not in (300, 2400):
         raise ValueError("unsupported baud rate")
     zone = ZoneInfo(zone_name)
@@ -97,7 +75,7 @@ def sync_once(port, baud, address, meter_id, zone_name, *, reader=read_one,
     delta = (current.replace(tzinfo=None) - old).total_seconds()
     transition = False
     if seasonal_shift is not None:
-        if not auto or not use_dst or abs(delta - seasonal_shift) > 300:
+        if not auto or abs(delta - seasonal_shift) > 300:
             return {"before": before["meter_local_time"], "target": None,
                     "after": before["meter_local_time"], "changed": False,
                     "manual_required": True,
@@ -148,7 +126,7 @@ def sync_once(port, baud, address, meter_id, zone_name, *, reader=read_one,
     expected_dst = bool(target.dst()) if force_dst is None else force_dst
     if drift > 120:
         raise ValueError("clock readback differs from target: wall time")
-    if after["meter_summer_time"] != expected_dst and seasonal_shift is None:
+    if force_dst is not None and after["meter_summer_time"] != expected_dst:
         raise ValueError("clock readback differs from target: DST bit")
     return {"before": before["meter_local_time"],
             "target": target.isoformat(timespec="minutes"), "changed": True,

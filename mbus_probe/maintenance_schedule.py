@@ -138,7 +138,10 @@ class MaintenanceSchedule:
             return None
         enabled = self.config.get("use_daylight_saving_time", True)
         zone = self.config.get("clock_timezone", "Europe/Oslo")
-        transition = latest_transition(local, zone) if enabled else None
+        transition = latest_transition(local, zone)
+        if transition and not enabled:
+            transition = dict(transition, shift_seconds=-transition["shift_seconds"],
+                              expected_dst=False, policy="standard_time")
         store = TransitionStore(self.root, meter_id)
         try:
             state = store.establish_baseline(transition, f"{zone}:{enabled}")
@@ -146,8 +149,8 @@ class MaintenanceSchedule:
                 return None
             observation = self.clock_observations.get(meter_id, {})
             observed = datetime.fromisoformat(observation["observed_at_utc"])
-            noon = datetime.fromisoformat(transition["key"].rsplit(":", 1)[1]).replace(hour=12, tzinfo=self.zone)
-            if observed.tzinfo is None or not noon.timestamp() <= observed.timestamp() <= local.timestamp():
+            boundary = datetime.fromisoformat(transition["at_utc"])
+            if observed.tzinfo is None or not boundary.timestamp() <= observed.timestamp() <= local.timestamp():
                 return None
             if local.timestamp() - observed.timestamp() > 900:
                 return None
@@ -159,7 +162,7 @@ class MaintenanceSchedule:
             if outcome == "independent_success" and hasattr(self.clock, "last_write_at"):
                 last_write = self.clock.last_write_at(meter_id)
                 # Even a manual test or an uncertain write invalidates independent success.
-                if last_write is not None and last_write.timestamp() >= (noon - timedelta(hours=12)).timestamp():
+                if last_write is not None and last_write.timestamp() >= boundary.timestamp():
                     store.record_intervened(transition, local)
                     return None
             store.observe(transition, offset, mismatch, local)

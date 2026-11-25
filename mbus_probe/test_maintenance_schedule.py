@@ -127,7 +127,7 @@ class ScheduleTests(unittest.TestCase):
         self.assertEqual(self.clock.calls, [])
 
 
-    def test_transition_once_at_noon_and_persistent_failure(self):
+    def test_transition_at_actual_boundary_and_persistent_failure(self):
         from dst_transition import TransitionStore
         self.schedule.config["auto_monthly_history"] = False
         self.schedule.config["auto_clock_sync"] = False
@@ -137,11 +137,11 @@ class ScheduleTests(unittest.TestCase):
         self.schedule.on_valid_round([meter])
         store = TransitionStore(self.tmp.name, meter)
         self.assertIsNone(store.load()["dst_transition_failed"])
-        self.local = self.local.replace(day=29, hour=11)
+        self.local = self.local.replace(day=29, hour=1)
         self.schedule.observe_clock(meter, {"clock_offset_seconds": -3600, "clock_dst_mismatch": True})
         self.schedule.on_valid_round([meter])
         self.assertIsNone(store.load()["dst_transition_failed"])
-        self.local = self.local.replace(hour=12)
+        self.local = self.local.replace(hour=3)
         self.schedule.observe_clock(meter, {"clock_offset_seconds": -3600, "clock_dst_mismatch": True})
         self.schedule.on_valid_round([meter])
         self.assertTrue(store.load()["dst_transition_failed"])
@@ -156,6 +156,20 @@ class ScheduleTests(unittest.TestCase):
         self.assertFalse(store.load()["dst_transition_failed"])
         self.assertFalse(store.load()["dst_clock_override"])
 
+
+    def test_standard_time_seasonal_check(self):
+        from dst_transition import TransitionStore
+        self.schedule.config.update(use_daylight_saving_time=False,
+                                    auto_monthly_history=False, auto_clock_sync=False)
+        meter = "12345678"
+        self.local = self.local.replace(month=3, day=28, hour=12)
+        self.schedule.on_valid_round([meter])
+        self.local = self.local.replace(day=29, hour=3)
+        self.schedule.observe_clock(meter, {"clock_offset_seconds": 0, "clock_dst_mismatch": True})
+        self.schedule.on_valid_round([meter])
+        store = TransitionStore(self.tmp.name, meter)
+        self.assertFalse(store.load()["dst_transition_failed"])
+        self.assertEqual(self.clock.calls, [])
 
     def test_catch_up_after_restart_and_intervention_does_not_clear_latch(self):
         from dst_transition import TransitionStore

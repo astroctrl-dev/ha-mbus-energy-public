@@ -83,6 +83,8 @@ def load_config(path="/data/options.json"):
     if config.get("auto_clock_sync") and not config.get("allow_clock_sync"):
         raise ValueError("auto_clock_sync requires allow_clock_sync")
     from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+    # Supervisor supplies the HA IANA timezone. Retain configured fallback for standalone use.
+    config["clock_timezone"] = os.environ.get("TZ") or config.get("clock_timezone", "Europe/Oslo")
     try:
         ZoneInfo(config.get("clock_timezone", "Europe/Oslo"))
     except (ZoneInfoNotFoundError, TypeError, ValueError):

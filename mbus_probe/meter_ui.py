@@ -134,13 +134,6 @@ async function refresh() {
           });
           clock.disabled = !state.clock_enabled || state.clock.status === 'running' || state.history.status === 'running';
           line.append(clock);
-           const dst = button('Test DST write (04 ED 00)', async () => {
-             if (!confirm('Test both DST bits, then restore configured time? This temporarily writes an incorrect DST bit.')) return;
-             try { await call('/api/clock', {meter_id:item.meter_id, confirm:true, test_dst:true}); await refresh(); }
-             catch(e) { document.getElementById('error').textContent=e.message; }
-           });
-           dst.disabled = clock.disabled;
-           line.append(dst);
         }
         else if (item.supported) line.append(button('Legg til', () => act('/api/select', item.meter_id)));
         else line.append(' (ikke støttet)');
@@ -344,7 +337,9 @@ def serve(registry, config, client, bus_lock, stop, port=8099, history_controlle
                         raise ValueError("migrate saved history before clock synchronization")
                     if data.get("confirm") is not True:
                         raise ValueError("clock write requires explicit confirmation")
-                    clock_controller.start(meter_id, test_dst=data.get("test_dst") is True)
+                    if data.get("test_dst") is True:
+                        raise ValueError("Experimental DST writes are retired")
+                    clock_controller.start(meter_id)
                 elif route == "select":
                     registry.select(meter_id)
                 elif route == "auto":

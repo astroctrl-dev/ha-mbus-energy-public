@@ -1,3 +1,12 @@
+# 2.7.4-beta.1
+
+- Use the Home Assistant timezone supplied by Supervisor, with configured fallback.
+- Check seasonal transitions after the actual UTC transition instant on the next eligible valid polling round, including fixed standard-time policy.
+- Verify clock writes using wall time rather than the reported DST bit.
+- Retire experimental DST write tests; retain historical evidence and existing diagnostics.
+- Seconds-resolution reading remains unverified; minute-based reading is retained.
+- Automated private CI: 171 tests passed and Docker build succeeded. Physical seasonal transition and active alarm persistence remain unverified. Controlled beta only.
+
 # 2.7.3-beta.1
 
 - Persistent seasonal transition diagnostics and verified clock override indicator.

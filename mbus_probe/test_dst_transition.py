@@ -1,6 +1,6 @@
 import tempfile
 import unittest
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from dst_transition import latest_transition, evaluate_transition, TransitionStore
 
@@ -11,19 +11,36 @@ class TransitionTests(unittest.TestCase):
         self.spring = datetime(2026, 3, 29, 12, tzinfo=self.zone)
         self.autumn = datetime(2026, 10, 25, 12, tzinfo=self.zone)
 
-    def test_noon_and_catch_up(self):
+    def test_transition_and_catch_up(self):
         a = latest_transition(self.spring, self.zone.key)
         self.assertEqual(a["shift_seconds"], 3600)
-        self.assertNotEqual(latest_transition(self.spring.replace(hour=11), self.zone.key)["key"], a["key"])
+        self.assertNotEqual(latest_transition(self.spring.replace(hour=1), self.zone.key)["key"], a["key"])
         self.assertEqual(latest_transition(self.spring.replace(day=30), self.zone.key), a)
         self.assertEqual(latest_transition(self.autumn, self.zone.key)["shift_seconds"], -3600)
+
+    def test_exact_utc_boundary_and_autumn_fold(self):
+        for instant, shift in ((datetime(2027, 3, 28, 1, tzinfo=timezone.utc), 3600),
+                               (datetime(2027, 10, 31, 1, tzinfo=timezone.utc), -3600)):
+            transition = latest_transition(instant, self.zone.key)
+            self.assertEqual(transition["at_utc"], instant.isoformat())
+            self.assertEqual(transition["shift_seconds"], shift)
+            self.assertNotEqual(latest_transition(instant - timedelta(seconds=1), self.zone.key)["key"],
+                                transition["key"])
+            self.assertEqual(latest_transition(instant + timedelta(hours=1), self.zone.key), transition)
+
+    def test_standard_time_projection(self):
+        from clock_model import configured_local
+        for month, expected in ((1, 13), (7, 14)):
+            stamp = datetime(2027, month, 1, 12, tzinfo=timezone.utc)
+            self.assertEqual(configured_local(stamp, self.zone.key, True).hour, expected)
+            self.assertEqual(configured_local(stamp, self.zone.key, False).hour, 13)
 
     def test_classification(self):
         for date, offset in ((self.spring, -3600), (self.autumn, 3600)):
             t = latest_transition(date, self.zone.key)
             self.assertEqual(evaluate_transition(t, offset, True), "seasonal_correction_required")
             self.assertEqual(evaluate_transition(t, -offset, True), "failed")
-            self.assertEqual(evaluate_transition(t, 0, True), "failed")
+            self.assertEqual(evaluate_transition(t, 0, True), "independent_success")
             self.assertEqual(evaluate_transition(t, 0, False), "independent_success")
             self.assertEqual(evaluate_transition(t, None, False), "unknown")
 

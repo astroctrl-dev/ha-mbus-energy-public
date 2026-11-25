@@ -232,41 +232,23 @@ class DSTTransitionTests(unittest.TestCase):
 
 
 class DSTWriteTests(unittest.TestCase):
-    def test_force_bit_encoding(self):
-        local = datetime(2026, 11, 25, 12, 0, tzinfo=ZoneInfo("Europe/Oslo"))
-        self.assertEqual(set_clock_frame(7, local, True)[10] & 0x80, 0x80)
-        self.assertEqual(set_clock_frame(7, local, False)[10] & 0x80, 0)
+    @patch("clock_maintenance._read_clock")
+    def test_experimental_writes_retired(self, read_clock):
+        for options in ({"test_dst": True}, {"force_dst": True}, {"alternate": True}):
+            with self.assertRaisesRegex(ValueError, "retired"):
+                sync_once("/dev/ttyUSB0", 2400, 7, "12345678", "Europe/Oslo", **options)
+        read_clock.assert_not_called()
 
     @patch("clock_maintenance._read_clock")
-    def test_both_bits_and_restore(self, read_clock):
-        local = datetime(2026, 11, 25, 12, 0, tzinfo=ZoneInfo("Europe/Oslo"))
-        read_clock.side_effect = [{"meter_local_time": "2026-11-25T12:00", "meter_summer_time": b}
-                                  for b in (False, True, True, False, False, False)]
+    def test_manual_wall_time_success_without_dst_bit(self, read_clock):
+        instant = datetime(2026, 7, 1, 12, 0, tzinfo=ZoneInfo("Europe/Oslo"))
+        read_clock.return_value = {"meter_local_time": "2026-07-01T12:00", "meter_summer_time": False}
         ser = FakeSerial()
         result = sync_once("/dev/ttyUSB0", 2400, 7, "12345678", "Europe/Oslo",
                            serial_factory=lambda *a, **k: ser, sleep=lambda _: None,
-                           now=lambda: local, test_dst=True)
-        self.assertEqual(result["dst_test_results"], {"1": True, "0": True})
-        self.assertTrue(result["clock_restored"])
-        self.assertEqual([f[11] & 0x80 for f in ser.sent[:2]], [0x80, 0])
-        self.assertEqual(ser.sent[2][10] & 0x80, 0)
-        self.assertEqual(ser.sent[0][7:10], bytes((4, 0xED, 0)))
-        self.assertEqual(ser.sent[0][1:3], bytes((10, 10)))
-        self.assertEqual(ser.sent[0][-2], sum(ser.sent[0][4:-2]) & 255)
-
-    @patch("clock_maintenance._read_clock")
-    def test_alternative_failure_skips_zero_and_restores(self, read_clock):
-        local = datetime(2026, 11, 25, 12, 0, tzinfo=ZoneInfo("Europe/Oslo"))
-        read_clock.return_value = {"meter_local_time": "2026-11-25T12:00", "meter_summer_time": False}
-        ser = FakeSerial()
-        result = sync_once("/dev/ttyUSB0", 2400, 7, "12345678", "Europe/Oslo",
-                           serial_factory=lambda *a, **k: ser, sleep=lambda _: None,
-                           now=lambda: local, test_dst=True)
-        self.assertEqual(result["dst_test_results"], {"1": False})
-        self.assertIn("DST bit", result["dst_test_errors"]["1"])
-        self.assertTrue(result["clock_restored"])
-        self.assertEqual(len(ser.sent), 2)
-        self.assertEqual(ser.sent[1][7:9], bytes((4, 0x6D)))
+                           now=lambda: instant)
+        self.assertTrue(result["changed"])
+        self.assertFalse(result["dst_readback"])
 
 
 class DSTBitOnlyTests(unittest.TestCase):
