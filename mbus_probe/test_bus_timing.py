@@ -150,3 +150,40 @@ class ResumeTests(unittest.TestCase):
             now[0] += 80
             restarted._persist_resume(161.)
             self.assertTrue(gate().ready())
+
+
+class SlotToleranceTests(unittest.TestCase):
+    def test_flexible_slots_and_hour_boundary(self):
+        from bus_timing import poll_slot, slot_tolerance, slot_open, MissedSlot
+        self.assertTrue(slot_open(3595, 3598, slot_tolerance(True, 3595)))
+        self.assertFalse(slot_open(3595, 3600, slot_tolerance(True, 3595)))
+        self.assertTrue(slot_open(3600, 3609, slot_tolerance(False, 3600)))
+        self.assertFalse(slot_open(3600, 3610, slot_tolerance(False, 3600)))
+        now = [3500.]
+        class Serial:
+            def write(self, frame): return len(frame)
+        with tempfile.TemporaryDirectory() as root:
+            gate = BusTiming(Path(root)/"last", lambda: now[0], lambda: now[0],
+                             lambda d: now.__setitem__(0, now[0]+d))
+            now[0] = 3598.
+            with poll_slot(3595., slot_tolerance(True, 3595.)):
+                self.assertEqual(gate.write(Serial(), b"read"), 4)
+            now[0] = 3600.
+            with poll_slot(3595., slot_tolerance(True, 3595.)):
+                with self.assertRaises(MissedSlot):
+                    gate.write(Serial(), b"read")
+
+    def test_durable_preparation_cannot_cross_hour_boundary(self):
+        from bus_timing import poll_slot, slot_tolerance, MissedSlot
+        from unittest.mock import patch
+        now = [3500.]
+        class Serial:
+            def write(self, frame): raise AssertionError("must not transmit")
+        with tempfile.TemporaryDirectory() as root:
+            gate = BusTiming(Path(root)/"last", lambda: now[0], lambda: now[0],
+                             lambda d: now.__setitem__(0, now[0]+d))
+            now[0] = 3598.
+            with patch.object(gate, "_persist_resume", side_effect=lambda _: now.__setitem__(0, 3600.)):
+                with poll_slot(3595., slot_tolerance(True, 3595.)):
+                    with self.assertRaises(MissedSlot):
+                        gate.write(Serial(), b"read")

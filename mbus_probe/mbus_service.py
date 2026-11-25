@@ -12,7 +12,7 @@ from contextlib import nullcontext
 
 from poll_schedule import next_aligned_poll_wait
 from raw_telegram_log import RawLog, install
-from bus_timing import BusTiming, install_bus_timing, MissedSlot, poll_slot
+from bus_timing import BusTiming, install_bus_timing, MissedSlot, poll_slot, slot_tolerance, slot_open
 from maintenance_schedule import MaintenanceSchedule
 
 from ha_measurements import SENSORS, select_measurements
@@ -205,13 +205,14 @@ def run(config, client, registry=None, bus_lock=None, history_controller=None,
                             if registry.selected.get(row["meter_id"]) != row["address"]:
                                 continue
                     priority = timing is not None and row["meter_id"] not in attempted_meters
-                    if timing and not priority and (target is None or not timing.ready() or not 0 <= time.time() - target <= 1):
+                    tolerance = slot_tolerance(config.get('read_before_full_hour', False), target)
+                    if timing and not priority and (not timing.ready() or not slot_open(target, time.time(), tolerance)):
                         LOG.info("Scheduled polling slot skipped: bus busy or slot elapsed")
                         continue
                     if request_pacer and not request_pacer.before_request(STOP):
                         continue
                     attempted_meters.add(row['meter_id'])
-                    with poll_slot(target) if timing and not priority else nullcontext():
+                    with poll_slot(target, tolerance) if timing and not priority else nullcontext():
                         if timing:
                             last_served = row["meter_id"]
                         values = poll_once(meter_config, client)

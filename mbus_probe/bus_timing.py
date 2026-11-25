@@ -16,6 +16,18 @@ from contextlib import contextmanager
 
 LOG = logging.getLogger("mbus.bus")
 MIN_INTERVAL = 61.0
+POLL_SLOT_TOLERANCE = 10.0
+
+
+def slot_tolerance(before_hour=False, target=None):
+    # Limit shifted slots to their own hour, never send at/after rollover.
+    if before_hour and target is not None:
+        return min(POLL_SLOT_TOLERANCE, 3600 - target % 3600)
+    return POLL_SLOT_TOLERANCE
+
+
+def slot_open(target, now, tolerance):
+    return target is not None and 0 <= now - target < tolerance
 _gate = None
 _slot = threading.local()
 
@@ -25,13 +37,16 @@ class MissedSlot(RuntimeError):
 
 
 @contextmanager
-def poll_slot(target):
+def poll_slot(target, tolerance=1.0):
     previous = getattr(_slot, 'target', None)
+    previous_tolerance = getattr(_slot, 'tolerance', 1.0)
     _slot.target = target
+    _slot.tolerance = tolerance
     try:
         yield
     finally:
         _slot.target = previous
+        _slot.tolerance = previous_tolerance
 
 
 class BusTiming:
@@ -95,7 +110,7 @@ class BusTiming:
         try:
             with self.lock:
                 target = getattr(_slot, 'target', None)
-                if target is not None and (not self.ready() or not 0 <= self.wall() - target <= 1):
+                if target is not None and (not self.ready() or not slot_open(target, self.wall(), getattr(_slot, 'tolerance', 1.0))):
                     raise MissedSlot('bus not eligible at planned slot')
                 while self.monotonic() < self.eligible:
                     self.sleep(self.eligible - self.monotonic())
@@ -114,10 +129,12 @@ class BusTiming:
                 # after write returns, conservatively including transmission time.
                 if callable(frame):
                     frame = frame()
-                LOG.info("M-Bus TX ready: %d bytes", len(frame))
-                if target is not None and not 0 <= self.wall() - target <= 1:
+                if target is not None and not slot_open(target, self.wall(), getattr(_slot, 'tolerance', 1.0)):
                     raise MissedSlot('serial preparation exceeded planned slot')
                 self._persist_resume(None)  # Durable uncertain state before any send.
+                if target is not None and not slot_open(target, self.wall(), getattr(_slot, 'tolerance', 1.0)):
+                    raise MissedSlot('durable preparation exceeded planned slot')
+                LOG.info("M-Bus TX ready: %d bytes", len(frame))
                 attempted = True
                 try:
                     written = serial.write(frame)

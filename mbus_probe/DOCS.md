@@ -71,3 +71,7 @@ Leave all optional switches off, including measurement logging, raw logging, rec
 ## Fast startup
 
 Ordinary measurement is prioritized before automatic maintenance. On a fresh installation without prior local bus state, the first request is immediate; discovery traffic counts as bus activity. On app restart in the same host boot, a durable completed-send monotonic timestamp permits waiting only the remaining part of the 61-second interval. Missing, invalid, interrupted or different-boot state uses a full 61-second guard. New meter selections wake the polling loop; normal-frame recovery always takes precedence. Automatic clock/history jobs start only after valid normal readings. Ordinary schedule resumes afterwards. Allow extra time for communication, MQTT and discovery.
+
+Frame 2 labelled vendor diagnostic values are retained as opaque records; only the monthly set-day is interpreted for date estimates.
+
+Ordinary scheduled reads tolerate internal delay of less than ten seconds. Shifted reads have the same tolerance, capped at the hour boundary; they are never intentionally transmitted at or after that boundary. A response may arrive in the next hour. The 61-second transmission guard is unchanged.

@@ -84,6 +84,22 @@ def decode_records(data):
                 raise ValueError("truncated/too many VIFE")
             b = data[i]; i += 1; vifes.append(b)
             more = bool(b & 0x80)
+        # T230 frame 2 contains vendor diagnostic labels following FC 6E.
+        # Only the observed fixed-width labelled diagnostic format is supported;
+        # retain the value as opaque data rather than interpreting its meaning.
+        label_hex = None
+        if dif == 0x34 and not difes and vif == 0xfc and vifes == [0x6e]:
+            if i >= len(data) or data[i] not in (2, 3):
+                raise ValueError("unsupported T230 diagnostic label length")
+            label_length = data[i]
+            i += 1
+            if i + label_length > len(data):
+                raise ValueError("truncated T230 diagnostic label")
+            label = data[i:i+label_length]
+            if any(not 0x20 <= b <= 0x7e for b in label):
+                raise ValueError("invalid T230 diagnostic label")
+            label_hex = label.hex(" ")
+            i += label_length
         typ = dif & 0x0f
         if typ not in lengths:
             raise ValueError(f"unsupported DIF encoding 0x{typ:02x} at offset {start}")
@@ -149,5 +165,7 @@ def decode_records(data):
                 record.update(kind="unknown_vif", integer=integer)
         else:
             record["kind"] = "unsupported_value"
+        if label_hex is not None:
+            record.update(kind="vendor_diagnostic_opaque", label_hex=label_hex)
         result.append(record)
     return result

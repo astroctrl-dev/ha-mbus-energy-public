@@ -5,6 +5,37 @@ from monthly_diagnostic import select_frame_three, restore_normal_frame, extract
 
 
 class MonthlyDiagnosticTests(unittest.TestCase):
+    def test_physical_frame_two_layout_sanitized(self):
+        from monthly_diagnostic import extract_monthly_set_day
+        from mbus_probe import validate
+        # Preserve physical record layout, replace meter ID and unrelated values.
+        records = bytes.fromhex(
+            "d4 10 ad 6f 00 00 00 00 d4 10 bb 6f 00 00 00 00 "
+            "d4 10 da 6f 00 00 00 00 d4 10 de 6f 00 00 00 00 "
+            "44 6d 00 00 41 31 c4 8f 0f 6d 00 00 e1 ff "
+            "c4 8f 4f 6d 00 00 ef ff 34 6d 00 00 41 31 "
+            "34 fc 6e 02 54 46 00 00 00 00 34 fc 6e 02 53 46 00 00 00 00 "
+            "34 fc 6e 02 45 46 00 00 00 00 34 fc 6e 03 31 46 46 00 00 00 00 "
+            "34 fc 6e 03 32 46 46 00 00 00 00 0f 00 00 00 00 00")
+        body = bytes.fromhex("08 00 72 00 00 00 00 a7 32 07 04 40 00 00 00") + records
+        frame = bytes((0x68, len(body), len(body), 0x68)) + body + bytes((sum(body)&255, 0x16))
+        self.assertEqual(extract_monthly_set_day(frame, 0, "00000000"),
+                         {"day": 1, "hour": 0, "minute": 0})
+        self.assertEqual(sum(r["kind"] == "vendor_diagnostic_opaque"
+                             for r in validate(frame)["records"]), 5)
+        with self.assertRaises(ValueError):
+            extract_monthly_set_day(frame, 0, "12345678")
+        with self.assertRaises(ValueError):
+            extract_monthly_set_day(frame[:-2] + bytes((frame[-2]^1, 0x16)), 0, "00000000")
+        from history_model import configured_anchor, configured_timestamp
+        observation = {"monthly_set_day": extract_monthly_set_day(frame, 0, "00000000"),
+                       "meter_local_time": "2026-11-25T03:51",
+                       "last_successful_read_utc": "2026-11-25T02:51:21+00:00",
+                       "meter_summer_time": False}
+        anchor = configured_anchor(observation, "2026-11-25T02:49:19+00:00", "Europe/Oslo")
+        self.assertEqual(configured_timestamp(anchor, 1), "2026-11-01T00:00")
+        self.assertEqual(configured_timestamp(anchor, 24), "2024-12-01T00:00")
+
     def test_documented_selection_and_restore_frames(self):
         self.assertEqual(select_frame_three(0), bytes.fromhex("68 04 04 68 53 00 50 03 a6 16"))
         self.assertEqual(restore_normal_frame(0), bytes.fromhex("68 03 03 68 53 00 50 a3 16"))

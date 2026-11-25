@@ -1,3 +1,9 @@
+# 2.6.0-beta.5
+
+- Allow scheduled polls up to ten seconds late, including shifted polls capped at the hour boundary; preserve the minimum bus interval.
+
+- Decode observed T230 frame-2 labelled diagnostic records as opaque values, retaining strict frame validation and enabling monthly set-day dates.
+
 # 2.6.0-beta.4
 
 - Prioritize first ordinary reads and new meter selection; reuse safe same-boot request timing after restart.
