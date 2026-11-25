@@ -130,7 +130,7 @@ class HistoryController:
                 raise ValueError("startup interrupted")
             port = self.config["serial_port"]
             baud = int(self.config.get("baud",2400))
-            if not shared_timing_active() and self.stop.wait(61):
+            if not shared_timing_active() and self.stop.wait(60):
                 raise ValueError("startup interrupted")
             tx,frame = reader(port,baud,address,timeout=5)
             read_at = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00","Z")
@@ -164,11 +164,11 @@ class HistoryController:
                     os.fsync(fd)
                 finally:
                     os.close(fd)
-                if not shared_timing_active() and self.stop.wait(61):
+                if not shared_timing_active() and self.stop.wait(60):
                     raise ValueError("startup interrupted")
                 LOG.info("Startup: confirmed historical frame; selecting normal telegram")
                 self._restore_interface(port,baud,address)
-                if not shared_timing_active() and self.stop.wait(61):
+                if not shared_timing_active() and self.stop.wait(60):
                     raise ValueError("startup interrupted")
                 tx,frame = reader(port,baud,address,timeout=5)
                 read_at = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00","Z")
@@ -206,7 +206,7 @@ class HistoryController:
                     LOG.info("Startup initialization complete; polling enabled")
                     return True
                 for meter_id, address in selected:
-                    if not shared_timing_active() and self.stop.wait(61):
+                    if not shared_timing_active() and self.stop.wait(60):
                         return False
                     port = self.config["serial_port"]
                     baud = int(self.config.get("baud", 2400))
@@ -235,15 +235,15 @@ class HistoryController:
                             LOG.info("Restoring interrupted app-owned archive to normal frame")
                         if len(selected) != 1:
                             raise ValueError("interface restore requires exactly one selected meter")
-                        if not shared_timing_active() and self.stop.wait(61):
+                        if not shared_timing_active() and self.stop.wait(60):
                             return False
                         self._restore_interface(port, baud, address)
-                        if not shared_timing_active() and self.stop.wait(61):
+                        if not shared_timing_active() and self.stop.wait(60):
                             return False
                         tx, frame = reader(port, baud, address, timeout=5)
                         self._recovery_log(tx, frame)
                         self._verify_recovery(validate(frame), address, meter_id)
-                if not shared_timing_active() and self.stop.wait(61):
+                if not shared_timing_active() and self.stop.wait(60):
                     return False
                 self.marker.unlink(missing_ok=True)
                 self.blocked.clear()
@@ -447,7 +447,7 @@ class HistoryController:
                         raise ValueError("selected meter changed or app is stopping")
                 # A normal poll or scan may have finished immediately before the lock.
                 if not shared_timing_active():
-                    self.pause(61)
+                    self.pause(60)
                 # Marker survives process crash. Clear only after verified restore.
                 self.root.mkdir(parents=True, exist_ok=True)
                 fd = os.open(self.marker, os.O_WRONLY | os.O_CREAT, 0o600)

@@ -87,7 +87,7 @@ def sync_once(port, baud, address, meter_id, zone_name, *, reader=read_one,
                 "manual_required": True,
                 "verified_at_utc": now().astimezone(timezone.utc).isoformat(timespec="seconds")}
     if not shared_timing_active():
-        sleep(61)  # Standalone diagnostic fallback.
+        sleep(60)  # Standalone diagnostic fallback.
     target = None
     if serial_factory is None:
         import serial
@@ -118,7 +118,7 @@ def sync_once(port, baud, address, meter_id, zone_name, *, reader=read_one,
         if ack != b"\xe5":
             raise ValueError("clock command not acknowledged")
     if not shared_timing_active():
-        sleep(61)
+        sleep(60)
     after = _read_clock(port, baud, address, meter_id, reader)
     actual = datetime.fromisoformat(after["meter_local_time"])
     expected = configured_local(now(), zone_name, use_dst).replace(tzinfo=None)
@@ -270,7 +270,7 @@ class ClockController:
                             or (self.history_blocked and self.history_blocked.is_set())):
                         raise ValueError("selected meter changed or app is stopping")
                 if not shared_timing_active():
-                    self.pause(61)
+                    self.pause(60)
                 try:
                     result = self.operation(
                         self.config["serial_port"], int(self.config.get("baud", 2400)),
@@ -281,7 +281,7 @@ class ClockController:
                         **({"seasonal_shift": seasonal_shift} if seasonal_shift is not None else {}))
                 finally:
                     if not shared_timing_active():
-                        self.pause(61)
+                        self.pause(60)
             if result["changed"]:
                 if transition is not None:
                     from dst_transition import TransitionStore

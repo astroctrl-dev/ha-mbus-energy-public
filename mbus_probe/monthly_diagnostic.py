@@ -16,7 +16,7 @@ from ha_measurements import select_measurements, REQUIRED_SENSORS
 
 
 LOG = logging.getLogger("mbus.history.sequence")
-MIN_REQUEST_INTERVAL = 61.0
+MIN_REQUEST_INTERVAL = 60.0
 
 
 class RestorationError(RuntimeError):

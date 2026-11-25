@@ -15,7 +15,7 @@ from pathlib import Path
 from contextlib import contextmanager
 
 LOG = logging.getLogger("mbus.bus")
-MIN_INTERVAL = 61.0
+MIN_INTERVAL = 60.0
 POLL_SLOT_TOLERANCE = 10.0
 
 
@@ -138,6 +138,12 @@ class BusTiming:
                 attempted = True
                 try:
                     written = serial.write(frame)
+                    # Wait for the serial output to drain before starting the
+                    # 60-second quiet period. Start-to-start spacing therefore
+                    # includes transmission time and exceeds one minute.
+                    drain = getattr(serial, "flush", None)
+                    if drain is not None:
+                        drain()
                     return written
                 finally:
                     completed = self.monotonic()

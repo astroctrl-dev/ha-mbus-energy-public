@@ -21,7 +21,7 @@ def select_archive(address, month_back):
     return bytes((0x68,len(data),len(data),0x68))+data+bytes((sum(data)&255,0x16))
 
 def collect_one(snapshot, address, meter_id, month_back, exchange, *, approved=False):
-    """Exchange must enforce bus lock, >=61 s spacing and persistent restore guard.
+    """Exchange must enforce bus lock, >=60 s spacing and persistent restore guard.
     No file writes; return supplemented copy only after normal verification.
     """
     if approved is not True:

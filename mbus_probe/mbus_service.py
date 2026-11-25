@@ -48,7 +48,7 @@ class RequestPacer:
             last = None
         now = self.clock()
         # Missing/corrupt clock provenance must never shorten the interval.
-        delay = 61.0 if last is None or now < last else max(0.0, 61.0 - (now - last))
+        delay = 60.0 if last is None or now < last else max(0.0, 60.0 - (now - last))
         if stop.wait(delay):
             return False
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -74,8 +74,8 @@ def load_config(path="/data/options.json"):
         raise ValueError("mqtt_host is required")
     if not 0 <= int(config.get("address", 0)) <= 250:
         raise ValueError("address outside 0..250")
-    if int(config.get("interval_seconds", 120)) not in (90, 120, 300, 600):
-        raise ValueError("interval_seconds must be one of 90, 120, 300, 600")
+    if int(config.get("interval_seconds", 120)) not in (60, 90, 120, 300, 600):
+        raise ValueError("interval_seconds must be one of 60, 90, 120, 300, 600")
     if not isinstance(config.get("allow_clock_sync", False), bool) or not isinstance(config.get("auto_clock_sync", False), bool):
         raise ValueError("clock sync options must be boolean")
     # Legacy options must never override the HA wall-clock policy.

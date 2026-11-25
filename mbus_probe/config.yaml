@@ -1,5 +1,5 @@
 name: "M-Bus T230 energimåling"
-version: "2.9.0-beta.5"
+version: "2.9.0"
 slug: "mbus_probe"
 description: "Read T230 via M-Bus, publish measurements with MQTT Discovery and retrieve history on demand."
 arch:
@@ -36,7 +36,7 @@ options:
 schema:
   serial_port: device(subsystem=tty)
   baud: int
-  interval_seconds: list(90|120|300|600)
+  interval_seconds: list(60|90|120|300|600)
   read_before_full_hour: bool
   log_measurement_data: bool
   raw_telegram_logging: bool
