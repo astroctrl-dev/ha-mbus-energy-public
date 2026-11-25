@@ -63,3 +63,11 @@ class PresentationTests(unittest.TestCase):
             self.assertEqual(set(re.findall(r"^  ([a-z_]+):", source, re.M)), expected)
             self.assertEqual(source.count("    name:"), len(expected))
             self.assertEqual(source.count("    description:"), len(expected))
+
+    def test_independent_ingress_and_export_use_english(self):
+        import inspect
+        source = inspect.getsource(serve)
+        self.assertIn('render_page("en-GB")', source)
+        self.assertIn('language="en-GB"', source)
+        self.assertNotIn("Accept-Language", source)
+        self.assertIn('M-Bus energy meters', render_page("en-GB"))

@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.5.0-beta.3
+
+- Independent web interface and Excel Info use English, regardless of browser preferences.
+- Home Assistant configuration translations remain available in four languages.
+- No additional settings or API permissions. Existing sensor names, identities and measurement handling unchanged.
+
 ## 2.5.0-beta.2
 
 - Removed separate language and Excel temperature configuration options.

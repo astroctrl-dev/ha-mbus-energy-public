@@ -224,7 +224,7 @@ def serve(registry, config, client, bus_lock, stop, port=8099, history_controlle
                 try:
                     payload = make_xlsx(load_samples("/data/analysis/normal.jsonl"),
                                         load_history("/data/analysis", registry.snapshot()["selected"]),
-                                        language=resolve_language("auto", self.headers.get("Accept-Language", "")),
+                                        language="en-GB",
                                         temperature_unit=None)
                 except (OSError, ValueError, KeyError):
                     self._send(409, {"error": "Ingen validerte analysedata tilgjengelig"})
@@ -237,7 +237,7 @@ def serve(registry, config, client, bus_lock, stop, port=8099, history_controlle
                 self.end_headers()
                 self.wfile.write(payload)
             elif self.path == "/" or self.path.endswith("/"):
-                self._send(200, render_page(resolve_language("auto", self.headers.get("Accept-Language", ""))), "text/html")
+                self._send(200, render_page("en-GB"), "text/html")
             else:
                 self._send(404, {"error": "not found"})
 
