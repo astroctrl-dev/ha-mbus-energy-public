@@ -122,3 +122,31 @@ class TimingTests(unittest.TestCase):
                     gate.write(Serial(), b"fail")
             self.assertEqual(seen, [(False, 122., 61., "sent"),
                                     (False, 183., 122., "write_error")])
+
+
+class ResumeTests(unittest.TestCase):
+    def test_fresh_restart_and_uncertain(self):
+        now = [100.]
+        stamps = []
+        class Serial:
+            def write(self, frame):
+                stamps.append(now[0])
+                return len(frame)
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / "last"
+            def gate(**kw):
+                return BusTiming(path, lambda: now[0], lambda: 1000 + now[0],
+                                 lambda d: now.__setitem__(0, now[0]+d),
+                                 resume=True, boot_id="test-boot", **kw)
+            first = gate(fresh=True)
+            first.write(Serial(), b"one")
+            self.assertEqual(stamps, [100.])
+            now[0] += 40
+            restarted = gate()
+            restarted.write(Serial(), b"two")
+            self.assertEqual(stamps, [100., 161.])
+            restarted._persist_resume(None)
+            self.assertEqual(gate().eligible, 222.)
+            now[0] += 80
+            restarted._persist_resume(161.)
+            self.assertTrue(gate().ready())

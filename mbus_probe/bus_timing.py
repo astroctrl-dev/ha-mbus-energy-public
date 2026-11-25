@@ -6,6 +6,8 @@ CLI usage outside the app must not share its serial device.
 """
 from raw_telegram_log import capture
 import logging
+import json
+import math
 import os
 import threading
 import time
@@ -34,13 +36,55 @@ def poll_slot(target):
 
 class BusTiming:
     def __init__(self, path="/data/analysis/last_bus_request",
-                 monotonic=time.monotonic, wall=time.time, sleep=time.sleep):
+                 monotonic=time.monotonic, wall=time.time, sleep=time.sleep,
+                 *, resume=False, fresh=False, boot_id=None):
         self.path = Path(path)
         self.monotonic, self.wall, self.sleep = monotonic, wall, sleep
         self.lock = threading.Lock()
         # A full startup guard is safe even after wall-clock adjustments or a
         # crash between persistence and serial transmission.
         self.eligible = monotonic() + MIN_INTERVAL
+        self.resume_path = self.path.with_name(self.path.name + ".resume")
+        self.boot_id = boot_id
+        if resume and self.boot_id is None:
+            try:
+                self.boot_id = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+            except OSError:
+                pass
+        if resume:
+            try:
+                state = json.loads(self.resume_path.read_text())
+                completed = state["completed"]
+                now = monotonic()
+                if (self.boot_id and state["boot_id"] == self.boot_id
+                        and type(completed) in (float, int)
+                        and math.isfinite(completed) and 0 <= completed <= now):
+                    self.eligible = max(now, completed + MIN_INTERVAL)
+            except FileNotFoundError:
+                if fresh and not self.path.exists():
+                    self.eligible = monotonic()
+            except (OSError, ValueError, KeyError, TypeError):
+                pass
+
+    def _persist_resume(self, completed):
+        if not self.boot_id:
+            return
+        self.resume_path.parent.mkdir(parents=True, exist_ok=True)
+        temp = self.resume_path.with_suffix(".tmp")
+        try:
+            with temp.open("w", encoding="ascii") as out:
+                json.dump({"boot_id": self.boot_id, "completed": completed}, out)
+                out.flush()
+                os.fsync(out.fileno())
+            os.chmod(temp, 0o600)
+            os.replace(temp, self.resume_path)
+            fd = os.open(self.resume_path.parent, os.O_RDONLY)
+            try:
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+        finally:
+            temp.unlink(missing_ok=True)
 
     def ready(self):
         return self.monotonic() >= self.eligible
@@ -73,12 +117,15 @@ class BusTiming:
                 LOG.info("M-Bus TX ready: %d bytes", len(frame))
                 if target is not None and not 0 <= self.wall() - target <= 1:
                     raise MissedSlot('serial preparation exceeded planned slot')
+                self._persist_resume(None)  # Durable uncertain state before any send.
                 attempted = True
                 try:
                     written = serial.write(frame)
                     return written
                 finally:
-                    self.eligible = self.monotonic() + MIN_INTERVAL
+                    completed = self.monotonic()
+                    self.eligible = completed + MIN_INTERVAL
+                    self._persist_resume(completed)
         finally:
             if attempted:
                 capture("TX", frame, "write_error" if written is None else

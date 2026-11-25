@@ -1,3 +1,10 @@
+# 2.6.0-beta.4
+
+- Prioritize first ordinary reads and new meter selection; reuse safe same-boot request timing after restart.
+
+- All optional configuration switches default off for fresh installations, including measurement logging.
+- Document ordinary polling first, six-minute history retrieval and potential temporary stale/unavailable live measurements.
+
 # 2.6.0-beta.3
 
 - Read monthly set-day configuration before frame 3; derive historical timestamps conservatively.

@@ -145,10 +145,23 @@ def run(config, client, registry=None, bus_lock=None, history_controller=None,
                                        config.get("read_before_full_hour", False),
                                        config.get("seconds_before_full_hour", 5), now=now)
         target = now + delay
-        STOP.wait(delay)
+        if registry and timing:
+            # Wake promptly when a new meter is selected, without sending
+            # outside the common transmission gate.
+            while not STOP.is_set():
+                ids = {row["meter_id"] for row in registry.snapshot()["selected"]}
+                if ids - attempted_meters:
+                    return None
+                remaining = target - time.time()
+                if remaining <= 0:
+                    break
+                STOP.wait(min(1.0, remaining))
+        else:
+            STOP.wait(delay)
         return target
 
-    target = wait_slot() if timing else None
+    attempted_meters = set()
+    target = None
     last_served = None
     while not STOP.is_set():
         if history_controller and history_controller.blocked.is_set():
@@ -179,6 +192,7 @@ def run(config, client, registry=None, bus_lock=None, history_controller=None,
             if last_served in ids:
                 index = ids.index(last_served) + 1
                 selections = selections[index:] + selections[:index]
+        attempted_meters.intersection_update(row['meter_id'] for row in selections)
         valid_meter_ids = []
         for row in selections:
             meter_config = dict(config, meter_id=row["meter_id"], address=row["address"])
@@ -190,12 +204,14 @@ def run(config, client, registry=None, bus_lock=None, history_controller=None,
                         with registry.lock:
                             if registry.selected.get(row["meter_id"]) != row["address"]:
                                 continue
-                    if timing and (not timing.ready() or not 0 <= time.time() - target <= 1):
+                    priority = timing is not None and row["meter_id"] not in attempted_meters
+                    if timing and not priority and (target is None or not timing.ready() or not 0 <= time.time() - target <= 1):
                         LOG.info("Scheduled polling slot skipped: bus busy or slot elapsed")
                         continue
                     if request_pacer and not request_pacer.before_request(STOP):
                         continue
-                    with poll_slot(target) if timing else nullcontext():
+                    attempted_meters.add(row['meter_id'])
+                    with poll_slot(target) if timing and not priority else nullcontext():
                         if timing:
                             last_served = row["meter_id"]
                         values = poll_once(meter_config, client)
@@ -245,7 +261,9 @@ def publish_saved_history(client, registry):
 def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     config = load_config()
-    timing = BusTiming()
+    fresh = (not Path('/data/analysis').exists() and not Path('/data/meters.json').exists()
+             and not config.get('meter_id'))
+    timing = BusTiming(resume=True, fresh=fresh)
     install_bus_timing(timing)
     registry = MeterRegistry()
     registry.migrate_legacy(config.get("meter_id"), int(config.get("address", 0)))

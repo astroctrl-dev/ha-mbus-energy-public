@@ -1,6 +1,6 @@
-# Public beta: v2.6.0-beta.3
+# Public beta: v2.6.0-beta.4
 
-The ordinary App Store channel currently offers an beta with monthly set-day retrieval and configurable logging. Back up before updating. Stable v2.5.0 remains the latest stable release. [Beta notes](RELEASE-2.6.0-beta.3.md).
+The ordinary App Store channel currently offers an beta with prioritized first measurements, monthly set-day retrieval and configurable logging. Back up before updating. Stable v2.5.0 remains the latest stable release. [Beta notes](RELEASE-2.6.0-beta.4.md).
 
 # Latest stable release: v2.5.0
 
@@ -54,3 +54,7 @@ After manual history retrieval, Home Assistant exposes 24 cumulative historical 
 - [Application documentation](mbus_probe/DOCS.md)
 
 Run offline tests from the repository root with `PYTHONPATH=mbus_probe python3 -m unittest discover -s mbus_probe -p 'test_*.py' -v`. Tests do not replace physical meter, clock and wiring verification.
+
+## First installation and restart
+
+Leave all optional switches off initially. Verify ordinary live measurements first, then enable optional features individually. Startup reads are prioritized before automatic maintenance; same-boot restart waits only the remaining 61-second guard where timing is known. Unknown state uses a full guard. History retrieval takes about six minutes per meter; ordinary values may be stale or temporarily unavailable.
