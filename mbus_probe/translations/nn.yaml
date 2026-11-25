@@ -1,0 +1,55 @@
+configuration:
+  language:
+    name: "Språk"
+    description: "Språk i appen og Excel-eksporten. Auto brukar nettlesarspråket, med engelsk som reserve."
+  temperature_unit:
+    name: "Temperatureining i Excel"
+    description: "Celsius (C), Kelvin (K) eller Fahrenheit (F) i Excel. Vel visingseiningane for sensorane i Home Assistant."
+  serial_port:
+    name: "Seriell eining"
+    description: "Vel den serielle eininga som er kopla til M-Bus-masteren."
+  baud:
+    name: "Baudfart"
+    description: "Fart for seriell kommunikasjon."
+  interval_seconds:
+    name: "Avlesingsintervall (s)"
+    description: "Intervall mellom planlagde ordinære avlesingar i sekund."
+  read_before_full_hour:
+    name: "Avlesing før heil time"
+    description: "Aktiver konfigurert forskyving før heil time."
+  seconds_before_full_hour:
+    name: "Sekund før heil time"
+    description: "Forskyving når avlesing før heil time er aktivert."
+  recovery_raw_log:
+    name: "Rålogg ved gjenoppretting"
+    description: "Aktiver logging av råtelegram ved gjenoppretting. Loggen kan innehalde målaridentifikatorar."
+  allow_recovery_interface_reset:
+    name: "Tillat gjenoppretting av grensesnitt"
+    description: "Tillat eksisterande mekanisme å gjenopprette normal telegramstruktur."
+  allow_monthly_history:
+    name: "Tillat månadshistorikk"
+    description: "Tillat innhenting av månadshistorikk."
+  auto_monthly_history:
+    name: "Automatisk månadshistorikk"
+    description: "Aktiver planlagd innhenting av månadshistorikk. Krev løyve ovanfor."
+  allow_clock_sync:
+    name: "Tillat klokkesynkronisering"
+    description: "Tillat skriving til målarklokka."
+  auto_clock_sync:
+    name: "Automatisk klokkesynkronisering"
+    description: "Aktiver planlagd klokkekontroll og tillaten korrigering."
+  clock_timezone:
+    name: "Tidssona til målaren"
+    description: "Tidssone som blir brukt ved klokkeoperasjonar."
+  mqtt_host:
+    name: "MQTT-vert"
+    description: "Vertsnamn eller adresse til MQTT-meklaren."
+  mqtt_port:
+    name: "MQTT-port"
+    description: "Port til MQTT-meklaren."
+  mqtt_username:
+    name: "MQTT-brukarnamn"
+    description: "Brukarnamn for MQTT-autentisering."
+  mqtt_password:
+    name: "MQTT-passord"
+    description: "Passord for MQTT-autentisering."

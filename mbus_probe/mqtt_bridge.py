@@ -8,6 +8,7 @@ import json
 from datetime import datetime, timezone
 
 from ha_measurements import REQUIRED_SENSORS, SENSORS, select_measurements
+from temperature_units import DIFFERENCE
 
 HA_UNITS = {"kWh": "kWh", "m3": "m³", "kW": "kW", "m3/h": "m³/h",
             "C": "°C", "K": "K", "h": "h"}
@@ -41,7 +42,10 @@ def discovery_messages(meter_id):
             "availability_mode": "all", "unit_of_measurement": HA_UNITS[unit],
             "state_class": state_class,
         }
-        if device_class:
+        if kind == DIFFERENCE:
+            # Keep the native K value and let HA convert intervals without an offset.
+            payload["device_class"] = "temperature_delta"
+        elif device_class:
             payload["device_class"] = device_class
         messages.append((topic, json.dumps(payload), True))
     for kind, label in (("meter_status", "M-Bus status"),

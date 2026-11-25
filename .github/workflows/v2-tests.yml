@@ -2,7 +2,7 @@ name: M-Bus 2.1 validation
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, beta]
   workflow_dispatch:
 permissions:
   contents: read
@@ -24,3 +24,23 @@ jobs:
         run: docker build -t mbus-v2-ci ./mbus_probe
       - name: Verify runtime imports
         run: docker run --rm --entrypoint python3 mbus-v2-ci -c 'import mbus_service, meter_ui, monthly_diagnostic, analysis_export, history_controller, history_model, clock_model, clock_maintenance'
+
+  publish-beta:
+    needs: test-and-build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/beta'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Publish tested beta
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          grep -Fx 'version: "2.5.0-beta.1"' mbus_probe/config.yaml
+          if gh release view v2.5.0-beta.1 >/dev/null 2>&1; then
+            exit 0
+          fi
+          gh release create v2.5.0-beta.1 --target "$GITHUB_SHA" --prerelease --title "M-Bus v2.5.0-beta.1" --notes-file RELEASE-2.5.0-beta.1.md

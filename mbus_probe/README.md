@@ -12,18 +12,18 @@ Read Landis+Gyr T230 over wired M-Bus, expose measurements via MQTT Discovery, a
 
 1. Select the actual serial_port under **Settings → Apps → M-Bus T230 energimåling → Configuration** and use the documented meter baud rate.
 2. Default mqtt_host is core-mosquitto for a local broker. Enter MQTT credentials locally. Select a polling interval of at least 90 seconds; default 120.
-3. Save and start, open the web UI and discover meters (**Søk etter målere**). Add (**Legg til**) a verified result. Meter ID and primary address appear locally. The current UI may use Norwegian labels.
+3. Save and start, open the web UI and discover meters (**Scan for meters**). Add (**Add**) a verified result. Meter ID and primary address appear locally. The app supports English, Norwegian Bokmål, Norwegian Nynorsk and German.
 4. Verify the seven measurement sensors and diagnostics under **Settings → Devices & services → MQTT**. Save and restart after configuration changes.
 
 ## Clock and data
 
 Meter local date/time is shown as text without an encoded UTC offset. HA last successful reading is separate and in UTC; the daylight-saving flag is separate. History contains 24 cumulative kWh readings and 23 adjacent differences. Estimated dates are clearly marked and are not measured billing dates.
 
-The analysis download (**Last ned analyse (.xlsx)**) exports stored validated readings without issuing a request. It substitutes an alias for the meter ID and excludes raw telegrams and credentials, but contains real measurements that should be reviewed before sharing.
+The analysis download (**Download Excel (.xlsx)**) exports stored validated readings without issuing a request. It substitutes an alias for the meter ID and excludes raw telegrams and credentials, but contains real measurements that should be reviewed before sharing.
 
 ## Monthly history
 
-Enable allow_monthly_history, save and restart, then select **Hent månedshistorikk** for the meter. The operation pauses regular polling, selects the historical frame, reads 24 records and restores and verifies the normal frame before resuming. It may take several minutes. Do not repeatedly press the button while running. With restore_unverified status, polling stays blocked until normal-frame verification. History is not recorded as new current HA Energy consumption.
+Enable allow_monthly_history, save and restart, then select **Retrieve monthly history** for the meter. The operation pauses regular polling, selects the historical frame, reads 24 records and restores and verifies the normal frame before resuming. It may take several minutes. Do not repeatedly press the button while running. With restore_unverified status, polling stays blocked until normal-frame verification. History is not recorded as new current HA Energy consumption.
 
 On completion, the web UI shows 24 readings and 23 differences. Excel includes the history worksheets (currently named **Månedshistorikk** and **Månedsforbruk**). A stored snapshot may also be displayed after restart. Without stored history, only regular readings are exported.
 
@@ -33,7 +33,7 @@ All earlier versions should be upgraded to v2.4.0. The application now coordinat
 
 ## Clock synchronization
 
-Off by default. Verify HA system time and the meter time zone (clock_timezone, default Europe/Oslo). Enable allow_clock_sync, save and restart. Manual synchronization (**Synkroniser målerklokke**) requires confirmation, reads the clock, writes system time in the configured zone and verifies readback. Meter time has minute resolution. If verification fails, check the clock before retrying.
+Off by default. Verify HA system time and the meter time zone (clock_timezone, default Europe/Oslo). Enable allow_clock_sync, save and restart. Manual synchronization (**Synchronize meter clock**) requires confirmation, reads the clock, writes system time in the configured zone and verifies readback. Meter time has minute resolution. If verification fails, check the clock before retrying.
 
 auto_clock_sync is optional and requires verified manual synchronization. Checks run after a valid reading at startup and during the configured nightly hour. Automatic correction is limited to deviations above 120 and up to 300 seconds, or a differing daylight-saving flag within the permitted bound. Larger deviations require manual action, including a full-hour daylight-saving offset. Do not share the adapter with another app.
 
@@ -50,3 +50,11 @@ The historical frame has no verified storage timestamp for each record. The app 
 A later manual retrieval can identify a confirmed archive rollover when all positions shift by one and the newest cumulative reading increases. This demonstrates an archive change, not its exact timestamp. See history_captured_at_utc for retrieval time and meter_date_status for date quality.
 
 See the [installation guide](https://github.com/astroctrl-dev/ha-mbus-energy-public/blob/main/INSTALLASJON.md). Legacy polling intervals below 90 seconds run at 120 seconds; select a supported interval before saving.
+
+## Language and measurement units (v2.5.0)
+
+Select `language` in Configuration: `auto` (default), `en-GB`, `nb-NO`, `nn-NO` or `de-DE`. Save and restart the app; no reinstallation is needed. Auto uses the browser's Accept-Language header where available, with English fallback. Home Assistant's configuration translations follow its own interface language independently. Technical identifiers and existing sensor names remain unchanged.
+
+The app publishes energy in kWh, power in kW, volume in m³, flow in m³/h and time counters in h. MQTT absolute temperatures retain native °C and the temperature difference retains native K. In Home Assistant versions supporting the temperature_delta device class, select the preferred display unit for each temperature sensor in its entity settings. The app's `temperature_unit` option (C, K or F) controls Excel export only; it does not override Home Assistant entity preferences. Temperature differences convert without an absolute-temperature offset. Existing archive data and Excel column and sheet identities are retained; the Info sheet is localized. Excel numeric cells remain numeric. Some unmapped technical error details remain in their original language.
+
+Before updating from v2.4.0, back up app data and Home Assistant. Verify entity IDs, temperature units, long-term statistics, regular polling, saved history and Excel export afterwards. In particular, verify the existing temperature-difference sensor after the discovery device-class change. If validation fails, stop the app and restore the known-good v2.4.0 version and backup as appropriate. Do not delete existing entities to work around unit problems.

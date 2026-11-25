@@ -73,6 +73,42 @@ class AnalysisExportTests(unittest.TestCase):
         self.assertEqual(list(wb["Månedsforbruk"].values)[1][3], 10)
         self.assertIsNone(list(wb["Månedshistorikk"].values)[1][4])
 
+    def test_localized_temperature_export_preserves_numeric_values_and_source(self):
+        from copy import deepcopy
+        from history_model import build_snapshot
+        with tempfile.TemporaryDirectory() as tmp:
+            sample = make_sample(self.decoded, "00000000", "2026-11-23T02:00:00Z",
+                                 Path(tmp) / "alias.key")
+            sample["records"] = [
+                dict(kind=kind, storage=0, tariff=0, subunit=0, function=0, value=value, unit=unit)
+                for kind, value, unit in (("flow_temperature", 37.5, "C"),
+                                           ("return_temperature", 36.4, "C"),
+                                           ("temperature_difference", 1.1, "K"),
+                                           ("energy", 12345, "kWh"))
+            ]
+            history = build_snapshot([{"month_back": n, "value": 1000 - 10*n, "unit": "kWh"}
+                                      for n in range(1, 25)], "2026-11-23T02:00:00Z")
+            original = deepcopy((sample, history))
+            for language, label in (("en-GB", "Field"), ("nb-NO", "Felt"),
+                                    ("nn-NO", "Felt"), ("de-DE", "Feld")):
+                for target, expected, symbol in (("C", (37.5,36.4,1.1), "°C"),
+                                                  ("K", (310.65,309.55,1.1), "K"),
+                                                  ("F", (99.5,97.52,1.98), "°F")):
+                    with self.subTest(language=language, target=target):
+                        wb = load_workbook(BytesIO(make_xlsx([sample], history, language, target)),
+                                           read_only=True, data_only=True)
+                        self.assertEqual(wb["Info"]["A1"].value, label)
+                        rows = list(wb["Normal records"].values)[1:]
+                        for row, number in zip(rows, expected):
+                            self.assertIsInstance(row[10], (float, int))
+                            self.assertAlmostEqual(row[10], number)
+                            self.assertEqual(row[11], symbol)
+                        self.assertEqual(rows[3][10:12], (12345, "kWh"))
+                        self.assertEqual(len(list(wb["Månedshistorikk"].values)), 25)
+                        self.assertEqual(len(list(wb["Månedsforbruk"].values)), 24)
+                        wb.close()
+            self.assertEqual((sample, history), original)
+
     def test_no_unvalidated_or_incomplete_export(self):
         with self.assertRaises(ValueError):
             make_xlsx([])

@@ -1,3 +1,7 @@
+# Opt-in beta: v2.5.0-beta.1
+
+Add `https://github.com/astroctrl-dev/ha-mbus-energy-public#beta` to the Home Assistant App Store on an isolated test instance. Do not run stable and beta against the same adapter or MQTT identity. This channel may create a separate app identity. See [beta release notes](RELEASE-2.5.0-beta.1.md).
+
 # M-Bus T230 energy metering for Home Assistant
 
 This app reads Landis+Gyr ULTRAHEAT T230 over wired M-Bus and publishes energy, volume, power, flow, temperatures and diagnostics via MQTT Discovery. Meter local time is displayed separately from the Home Assistant reading timestamp.

@@ -44,6 +44,24 @@ class MqttTests(unittest.TestCase):
         self.assertNotIn("device_class", by_kind["Målerklokke (lokal tid)"])
         self.assertEqual(by_kind["Siste avlesning (UTC)"]["device_class"], "timestamp")
 
+    def test_temperature_native_units_and_delta_class(self):
+        configs = {json.loads(p)["unique_id"].removeprefix(
+            "mbus_t230_" + device_key("00000000") + "_"): json.loads(p)
+            for _, p, _ in discovery_messages("00000000")}
+        for kind in ("flow_temperature", "return_temperature"):
+            self.assertEqual(configs[kind]["device_class"], "temperature")
+            self.assertEqual(configs[kind]["unit_of_measurement"], "°C")
+        delta = configs["temperature_difference"]
+        self.assertEqual(delta["device_class"], "temperature_delta")
+        self.assertEqual(delta["unit_of_measurement"], "K")
+        self.assertEqual(delta["state_class"], "measurement")
+        client = FakeClient()
+        values = publish_reading(client, self.decoded, "00000000")
+        states = {t.rsplit("/", 2)[-2]: p for t, p, _, _ in client.messages
+                  if t.endswith("/state")}
+        for kind in ("flow_temperature", "return_temperature", "temperature_difference"):
+            self.assertEqual(float(states[kind]), values[kind])
+
     def test_valid_read_online_after_states(self):
         client = FakeClient()
         values = publish_reading(client, self.decoded, "00000000")

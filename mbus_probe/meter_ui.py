@@ -1,5 +1,8 @@
 """Small ingress-only UI for selecting discovered meters. No direct host port."""
 import json
+from html import escape
+from i18n import resolve_language
+from ui_translations import TRANSLATIONS, STATUS_TEXT
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -61,7 +64,7 @@ async function call(path, body) {
     headers: body ? {'Content-Type':'application/json'} : {},
     body: body ? JSON.stringify(body) : undefined});
   const data = await response.json();
-  if (!response.ok) throw new Error(data.error || 'Forespørselen feilet');
+  if (!response.ok) throw new Error(localText(data.error) || 'Forespørselen feilet');
   return data;
 }
 function button(label, handler) {
@@ -73,13 +76,13 @@ async function refresh() {
   try {
     const state = await call('/api/meters');
     document.getElementById('status').textContent =
-      `Søk: ${state.scan_status}, adresser sjekket: ${state.scan_progress}/251, ` +
+      `Søk: ${localText(state.scan_status)}, adresser sjekket: ${state.scan_progress}/251, ` +
       `uavklarte svar: ${state.scan_errors.length}, opprydding venter: ${state.cleanup_pending}. ` +
-      `Historikk: ${state.history.status}` + (state.history.error ? ` – ${state.history.error}` : '');
+      `Historikk: ${localText(state.history.status)}` + (state.history.error ? ` – ${localText(state.history.error)}` : '');
     document.getElementById('clock-status').textContent =
-      `Klokke: ${state.clock.status}. Systemtid nå: ${state.clock_target}. ` +
+      `Klokke: ${localText(state.clock.status)}. Systemtid nå: ${state.clock_target}. ` +
       (state.clock.result ? `Før: ${state.clock.result.before || '—'}, mål: ${state.clock.result.target || 'ingen endring'}, etter: ${state.clock.result.after || '—'}. ` : '') +
-      (state.clock.error || '');
+      (localText(state.clock.error) || '');
     if (state.history.status === 'complete' && state.history.captured_at_utc !== lastHistoryCapture) {
       lastHistoryCapture = state.history.captured_at_utc;
       await refreshHistory();
@@ -133,7 +136,7 @@ document.getElementById('export').onclick = async () => {
   try {
     const res = await fetch(root + '/api/export.xlsx');
     if (!res.ok) {
-      const data = await res.json(); throw new Error(data.error || 'Ingen data tilgjengelig');
+      const data = await res.json(); throw new Error(localText(data.error) || 'Ingen data tilgjengelig');
     }
     const url = URL.createObjectURL(await res.blob());
     const link = document.createElement('a'); link.href = url;
@@ -144,6 +147,42 @@ document.getElementById('export').onclick = async () => {
 };
 setInterval(refresh, 1500); refreshHistory(); refresh();
 </script></html>"""
+
+
+def render_page(language):
+    """Translate presentation literals only; never rewrite routes or state keys."""
+    # Replace in a single pass so translated text is never translated again.
+    import re
+    language = resolve_language(language)
+    page = PAGE.replace('lang="no"', 'lang="' + language + '"', 1)
+    html, script = page.split("<script>", 1)
+    keys = sorted(TRANSLATIONS, key=len, reverse=True)
+    def translate(key):
+        return TRANSLATIONS[key].get(language, TRANSLATIONS[key]["en-GB"])
+    # Match complete HTML text nodes, not attributes or substrings of CSS.
+    html = re.sub(r">([^<>]+)<", lambda m: ">" + escape(translate(m[1])) + "<"
+                  if m[1] in TRANSLATIONS else m[0], html)
+    # JS strings and template fragments in the trusted static page.
+    # Apostrophes/backticks and template interpolation must remain escaped.
+    def js_text(key):
+        return (translate(key).replace("\\", "\\\\").replace("'", "\\'")
+                .replace("`", "\\`").replace("${", "\\${")
+                .replace("<", "\\x3c").replace("\n", "\\n").replace("\r", "\\r"))
+    # Match complete quoted strings or literal template fragments only.
+    # Do not search arbitrary JavaScript identifiers or executable expressions.
+    for key in keys:
+        quoted = "'" + key + "'"
+        if quoted in script:
+            script = script.replace(quoted, "'" + js_text(key) + "'")
+    fragments = ("Søk: ", ", adresser sjekket: ", "uavklarte svar: ",
+                 ", opprydding venter: ", "Historikk: ", "Klokke: ",
+                 ". Systemtid nå: ", "Før: ", ", mål: ", ", etter: ", ", adresse ")
+    pattern = re.compile("|".join(re.escape(k) for k in fragments))
+    script = pattern.sub(lambda m: js_text(m[0]), script)
+    display = {key: values.get(language, values["en-GB"]) for key, values in STATUS_TEXT.items()}
+    prefix = "const displayText = " + json.dumps(display, ensure_ascii=True).replace("<", "\\u003c") + ";\n"
+    prefix += "const localText = value => Object.prototype.hasOwnProperty.call(displayText, value) ? displayText[value] : value;\n"
+    return html + "<script>" + prefix + script
 
 
 def serve(registry, config, client, bus_lock, stop, port=8099, history_controller=None, clock_controller=None):
@@ -184,7 +223,9 @@ def serve(registry, config, client, bus_lock, stop, port=8099, history_controlle
             elif self.path.endswith("/api/export.xlsx"):
                 try:
                     payload = make_xlsx(load_samples("/data/analysis/normal.jsonl"),
-                                        load_history("/data/analysis", registry.snapshot()["selected"]))
+                                        load_history("/data/analysis", registry.snapshot()["selected"]),
+                                        language=resolve_language(config.get("language", "auto"), self.headers.get("Accept-Language", "")),
+                                        temperature_unit=config.get("temperature_unit", "C"))
                 except (OSError, ValueError, KeyError):
                     self._send(409, {"error": "Ingen validerte analysedata tilgjengelig"})
                     return
@@ -196,7 +237,7 @@ def serve(registry, config, client, bus_lock, stop, port=8099, history_controlle
                 self.end_headers()
                 self.wfile.write(payload)
             elif self.path == "/" or self.path.endswith("/"):
-                self._send(200, PAGE, "text/html")
+                self._send(200, render_page(resolve_language(config.get("language", "auto"), self.headers.get("Accept-Language", ""))), "text/html")
             else:
                 self._send(404, {"error": "not found"})
 

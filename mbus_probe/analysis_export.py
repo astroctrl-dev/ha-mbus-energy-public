@@ -8,6 +8,83 @@ from hashlib import sha256
 from io import BytesIO
 from pathlib import Path
 from ha_measurements import SENSORS
+from i18n import resolve_language
+from temperature_units import convert_temperature, UNITS
+
+EXPORT_TEXT = {
+    "Field": {
+        "en-GB": "Field",
+        "nb-NO": "Felt",
+        "nn-NO": "Felt",
+        "de-DE": "Feld"
+    },
+    "Value": {
+        "en-GB": "Value",
+        "nb-NO": "Verdi",
+        "nn-NO": "Verdi",
+        "de-DE": "Wert"
+    },
+    "Normal read count": {
+        "en-GB": "Normal read count",
+        "nb-NO": "Antall normalavlesninger",
+        "nn-NO": "Tal på normalavlesingar",
+        "de-DE": "Anzahl normaler Ablesungen"
+    },
+    "History status": {
+        "en-GB": "History status",
+        "nb-NO": "Historikkstatus",
+        "nn-NO": "Historikkstatus",
+        "de-DE": "Historiestatus"
+    },
+    "Validated snapshot": {
+        "en-GB": "Validated snapshot",
+        "nb-NO": "Validert historikk",
+        "nn-NO": "Validert historikk",
+        "de-DE": "Validierter Datenstand"
+    },
+    "Not available": {
+        "en-GB": "Not available",
+        "nb-NO": "Ikke tilgjengelig",
+        "nn-NO": "Ikkje tilgjengeleg",
+        "de-DE": "Nicht verfügbar"
+    },
+    "Meter timezone": {
+        "en-GB": "Meter timezone",
+        "nb-NO": "Målerens tidssone",
+        "nn-NO": "Tidssona til målaren",
+        "de-DE": "Zählerzeitzone"
+    },
+    "Unspecified; local meter time is not UTC": {
+        "en-GB": "Unspecified; local meter time is not UTC",
+        "nb-NO": "Uspesifisert; lokal målertid er ikke UTC",
+        "nn-NO": "Uspesifisert; lokal målartid er ikkje UTC",
+        "de-DE": "Nicht angegeben; lokale Zählerzeit ist nicht UTC"
+    },
+    "Historical dates": {
+        "en-GB": "Historical dates",
+        "nb-NO": "Historiske datoer",
+        "nn-NO": "Historiske datoar",
+        "de-DE": "Historische Daten"
+    },
+    "Meter storage time unverified; first-of-month estimates labeled separately": {
+        "en-GB": "Meter storage time unverified; first-of-month estimates labeled separately",
+        "nb-NO": "Målerens lagringstid er ikke verifisert; estimert første i måneden merkes separat",
+        "nn-NO": "Lagringstida til målaren er ikkje verifisert; estimert første i månaden blir merkt separat",
+        "de-DE": "Speicherzeitpunkt des Zählers nicht verifiziert; Schätzungen zum Monatsanfang separat gekennzeichnet"
+    },
+    "Export": {
+        "en-GB": "Export",
+        "nb-NO": "Eksport",
+        "nn-NO": "Eksport",
+        "de-DE": "Export"
+    },
+    "Decoded values only; no raw frames or actual meter ID": {
+        "en-GB": "Decoded values only; no raw frames or actual meter ID",
+        "nb-NO": "Kun dekodede verdier; ingen råtelegrammer eller faktisk måler-ID",
+        "nn-NO": "Berre dekoda verdiar; ingen råtelegram eller faktisk målar-ID",
+        "de-DE": "Nur dekodierte Werte; keine Rohtelegramme oder tatsächliche Zähler-ID"
+    }
+}
 
 ALLOWED_KINDS = {
     "energy", "volume", "power", "flow", "flow_temperature",
@@ -96,11 +173,14 @@ def load_samples(path):
     return [json.loads(line) for line in target.read_text(encoding="utf-8").splitlines()]
 
 
-def make_xlsx(samples, history=None):
+def make_xlsx(samples, history=None, language='en-GB', temperature_unit=None):
     """No macros, formulas, raw telegrams, actual IDs or network paths."""
     from openpyxl import Workbook
     if not samples and not history:
         raise ValueError("No validated analysis data available")
+    language = resolve_language(language)
+    if temperature_unit is not None and temperature_unit not in UNITS:
+        raise ValueError('unsupported temperature unit')
     wb = Workbook()
     info = wb.active
     info.title = "Info"
@@ -110,15 +190,18 @@ def make_xlsx(samples, history=None):
                 ("Meter timezone", "Unspecified; local meter time is not UTC"),
                 ("Historical dates", "Meter storage time unverified; first-of-month estimates labeled separately"),
                 ("Export", "Decoded values only; no raw frames or actual meter ID")):
-        info.append(row)
+        info.append(tuple(EXPORT_TEXT.get(v, {}).get(language, v) if isinstance(v, str) else v for v in row))
     ws = wb.create_sheet("Normal records")
     ws.append(HEADERS)
     for sample in samples:
         for r in sample["records"]:
+            value, unit = r["value"], r["unit"]
+            if temperature_unit is not None:
+                value, unit = convert_temperature(r["kind"], value, unit, temperature_unit)
             ws.append((sample["alias"], sample["read_at_utc"],
                        sample.get("meter_local_time"), sample.get("summer_time"),
                        sample["status"], r["kind"], r["storage"], r["tariff"],
-                       r["subunit"], r["function"], r["value"], r["unit"]))
+                       r["subunit"], r["function"], value, unit))
     if history:
         histories = [("", history)] if isinstance(history, dict) else list(history)
         stands = wb.create_sheet("Månedshistorikk")
