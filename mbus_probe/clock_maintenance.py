@@ -11,17 +11,17 @@ import json
 import os
 from pathlib import Path
 from mqtt_bridge import device_key
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 
-from clock_model import clock_observation
+from clock_model import clock_observation, configured_local, seasonal_offset
 from ha_measurements import select_measurements
 from mbus_probe import read_one, validate
 
 LOG = logging.getLogger("mbus.clock")
 
 
-def encode_type_f(local):
+def encode_type_f(local, force_dst=None):
     """EN 13757 data type F: minute, hour/DST, day/year, month/year."""
     if local.tzinfo is None or local.utcoffset() is None:
         raise ValueError("timezone-aware clock required")
@@ -29,15 +29,15 @@ def encode_type_f(local):
     if not 0 <= year <= 99:
         raise ValueError("meter year outside 2000..2099")
     return bytes((local.minute,
-                  local.hour | (0x80 if local.dst() else 0),
+                  local.hour | (0x80 if (bool(local.dst()) if force_dst is None else force_dst) else 0),
                   local.day | ((year & 7) << 5),
                   local.month | ((year >> 3) << 4)))
 
 
-def set_clock_frame(address, local):
+def set_clock_frame(address, local, force_dst=None):
     if type(address) is not int or not 0 <= address <= 250:
         raise ValueError("invalid primary address")
-    body = bytes((0x53, address, 0x51, 0x04, 0x6D)) + encode_type_f(local)
+    body = bytes((0x53, address, 0x51, 0x04, 0x6D)) + encode_type_f(local, force_dst)
     return bytes((0x68, len(body), len(body), 0x68)) + body + bytes((sum(body) & 255, 0x16))
 
 
@@ -53,20 +53,44 @@ def _read_clock(port, baud, address, meter_id, reader):
 @operation("clock_sync")
 def sync_once(port, baud, address, meter_id, zone_name, *, reader=read_one,
               sleep=time.sleep, now=lambda: datetime.now(timezone.utc),
-              serial_factory=None, on_write=None, auto=False, allow_auto_write=False):
+              serial_factory=None, on_write=None, auto=False, allow_auto_write=False, use_dst=True, test_dst=False, force_dst=None):
     """Read, write once, then read back. An ACK alone never counts as success."""
+    if test_dst:
+        if auto or force_dst is not None:
+            raise ValueError("DST test is manual only")
+        kwargs = dict(reader=reader, sleep=sleep, now=now, serial_factory=serial_factory,
+                      on_write=on_write, use_dst=use_dst)
+        results = {}
+        try:
+            for bit in (True, False):
+                try:
+                    result = sync_once(port, baud, address, meter_id, zone_name,
+                                       force_dst=bit, **kwargs)
+                    results[str(int(bit))] = result["dst_readback"] == bit
+                except Exception:
+                    results[str(int(bit))] = False
+                    # Stop further experimental writes after an uncertain result.
+                    break
+        finally:
+            restored = sync_once(port, baud, address, meter_id, zone_name, **kwargs)
+        restored.update(dst_test=True, dst_test_results=results, clock_restored=True)
+        return restored
+    if force_dst is not None and auto:
+        raise ValueError("forced DST is manual only")
     if baud not in (300, 2400):
         raise ValueError("unsupported baud rate")
     zone = ZoneInfo(zone_name)
     before = _read_clock(port, baud, address, meter_id, reader)
-    old = datetime.fromisoformat(before["meter_local_time"]).replace(tzinfo=zone)
-    current = now().astimezone(zone)
-    if auto and abs((current - old).total_seconds()) <= 120 and before["meter_summer_time"] == bool(current.dst()):
+    old = datetime.fromisoformat(before["meter_local_time"])
+    current = configured_local(now(), zone_name, use_dst)
+    if auto and abs((current.replace(tzinfo=None) - old).total_seconds()) <= 120 and before["meter_summer_time"] == bool(current.dst()):
         return {"before": before["meter_local_time"], "target": None,
                 "after": before["meter_local_time"], "changed": False,
                 "manual_required": False,
                 "verified_at_utc": now().astimezone(timezone.utc).isoformat(timespec="seconds")}
-    if auto and (not allow_auto_write or abs((current - old).total_seconds()) > 300):
+    delta = (current.replace(tzinfo=None) - old).total_seconds()
+    transition = seasonal_offset(now(), zone_name, use_dst, before["meter_summer_time"], delta)
+    if auto and (not allow_auto_write or (abs(delta) > 300 and not transition)):
         return {"before": before["meter_local_time"], "target": None,
                 "after": before["meter_local_time"], "changed": False,
                 "manual_required": True,
@@ -88,14 +112,14 @@ def sync_once(port, baud, address, meter_id, zone_name, *, reader=read_one,
             remainder = current.timestamp() % 60
             if remainder > 1:
                 sleep(60 - remainder)
-            target = now().astimezone(zone)
+            target = configured_local(now(), zone_name, use_dst)
             if target.timestamp() % 60 > 1:
                 raise ValueError("clock write missed minute boundary; retry manually")
             if on_write:
                 on_write(before["meter_local_time"], target.isoformat(timespec="minutes"))
             if now().timestamp() - target.timestamp() > 0.5 or now().timestamp() % 60 > 1:
                 raise ValueError("clock write preparation missed precision target")
-            return set_clock_frame(address, target)
+            return set_clock_frame(address, target, force_dst)
         write_frame(ser, build_at_boundary)
         ser.flush()
         ack = ser.read(1)
@@ -105,15 +129,18 @@ def sync_once(port, baud, address, meter_id, zone_name, *, reader=read_one,
     if not shared_timing_active():
         sleep(61)
     after = _read_clock(port, baud, address, meter_id, reader)
-    actual = datetime.fromisoformat(after["meter_local_time"]).replace(tzinfo=zone)
-    expected = now().astimezone(zone)
+    actual = datetime.fromisoformat(after["meter_local_time"])
+    expected = configured_local(now(), zone_name, use_dst).replace(tzinfo=None)
     drift = abs((expected - actual).total_seconds())
-    if drift > 120 or after["meter_summer_time"] != bool(target.dst()):
+    expected_dst = bool(target.dst()) if force_dst is None else force_dst
+    if drift > 120 or after["meter_summer_time"] != expected_dst:
         raise ValueError("clock readback differs from target")
     return {"before": before["meter_local_time"],
             "target": target.isoformat(timespec="minutes"), "changed": True,
             "manual_required": False,
             "after": after["meter_local_time"],
+            "dst_expected": expected_dst, "dst_readback": after["meter_summer_time"],
+            "dst_test": test_dst,
             "verified_at_utc": now().astimezone(timezone.utc).isoformat(timespec="seconds")}
 
 
@@ -194,7 +221,7 @@ class ClockController:
         with self.lock:
             return dict(self.state)
 
-    def start(self, meter_id, auto=False):
+    def start(self, meter_id, auto=False, test_dst=False):
         if auto and self.config.get("auto_clock_sync") is not True:
             return
         if self.config.get("allow_clock_sync") is not True:
@@ -209,10 +236,10 @@ class ClockController:
             if self.state["status"] == "running":
                 raise ValueError("clock sync already running")
             self.state = {"status": "running", "error": None, "result": None}
-            self.worker = threading.Thread(target=self._run, args=(meter_id, address, auto), daemon=True)
+            self.worker = threading.Thread(target=self._run, args=(meter_id, address, auto, test_dst), daemon=True)
             self.worker.start()
 
-    def _run(self, meter_id, address, auto):
+    def _run(self, meter_id, address, auto, test_dst=False):
         write_attempted = False
         before_and_target = {}
         def on_write(before, target):
@@ -235,12 +262,17 @@ class ClockController:
                         self.config["serial_port"], int(self.config.get("baud", 2400)),
                         address, meter_id, self.config.get("clock_timezone", "Europe/Oslo"),
                         on_write=on_write, auto=auto,
-                        allow_auto_write=self._trusted(meter_id))
+                        allow_auto_write=self._trusted(meter_id),
+                        use_dst=self.config.get("use_daylight_saving_time", True), test_dst=test_dst)
                 finally:
                     if not shared_timing_active():
                         self.pause(61)
             if result["changed"]:
                 self._save(meter_id, "verified")
+            if test_dst and not all(result.get("dst_test_results", {}).get(bit) is True for bit in ("0", "1")):
+                with self.lock:
+                    self.state = {"status": "failed", "error": "DST write test failed; configured clock restored", "result": result}
+                return
             LOG.info("Clock check completed; changed=%s manual_required=%s before=%s target=%s after=%s",
                      result["changed"], result["manual_required"],
                      result["before"], result["target"], result["after"])

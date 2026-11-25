@@ -11,4 +11,5 @@ class FirstInstallDefaultsTests(unittest.TestCase):
         for line in schema.splitlines():
             if line.endswith(": bool"):
                 key = line.strip().split(":")[0]
-                self.assertIn("  " + key + ": false", options.splitlines())
+                expected = "true" if key == "use_daylight_saving_time" else "false"
+                self.assertIn("  " + key + ": " + expected, options.splitlines())

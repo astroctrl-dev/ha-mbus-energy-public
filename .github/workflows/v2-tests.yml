@@ -39,8 +39,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          grep -Fx 'version: "2.7.1"' mbus_probe/config.yaml
-          if gh release view v2.7.1 >/dev/null 2>&1; then
+          grep -Fx 'version: "2.7.2"' mbus_probe/config.yaml
+          if gh release view v2.7.2 >/dev/null 2>&1; then
             exit 0
           fi
-          gh release create v2.7.1 --target "$GITHUB_SHA" --latest --title "M-Bus v2.7.1" --notes-file RELEASE-2.7.1.md
+          gh release create v2.7.2 --target "$GITHUB_SHA" --latest --title "M-Bus v2.7.2" --notes-file RELEASE-2.7.2.md

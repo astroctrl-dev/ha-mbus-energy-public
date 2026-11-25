@@ -213,3 +213,39 @@ class MinuteBoundaryTests(unittest.TestCase):
         self.assertEqual(waits, [61, 39, 61])
         self.assertEqual(result["target"], "2026-11-23T04:02+01:00")
         self.assertEqual(ser.sent[0][9], 2)
+
+
+class DSTTransitionTests(unittest.TestCase):
+    @patch("clock_maintenance._read_clock")
+    def test_trusted_spring_transition(self, read_clock):
+        read_clock.side_effect = [
+            {"meter_local_time": "2026-03-29T02:00", "meter_summer_time": False},
+            {"meter_local_time": "2026-03-29T03:00", "meter_summer_time": True}]
+        instant = datetime(2026, 3, 29, 3, 0, tzinfo=ZoneInfo("Europe/Oslo"))
+        ser = FakeSerial()
+        result = sync_once("/dev/ttyUSB0", 2400, 7, "12345678", "Europe/Oslo",
+                           serial_factory=lambda *a, **k: ser, sleep=lambda _: None,
+                           now=lambda: instant, auto=True, allow_auto_write=True)
+        self.assertTrue(result["changed"])
+        self.assertTrue(result["dst_readback"])
+        self.assertTrue(ser.sent[0][10] & 0x80)
+
+
+class DSTWriteTests(unittest.TestCase):
+    def test_force_bit_encoding(self):
+        local = datetime(2026, 11, 25, 12, 0, tzinfo=ZoneInfo("Europe/Oslo"))
+        self.assertEqual(set_clock_frame(7, local, True)[10] & 0x80, 0x80)
+        self.assertEqual(set_clock_frame(7, local, False)[10] & 0x80, 0)
+
+    @patch("clock_maintenance._read_clock")
+    def test_both_bits_and_restore(self, read_clock):
+        local = datetime(2026, 11, 25, 12, 0, tzinfo=ZoneInfo("Europe/Oslo"))
+        read_clock.side_effect = [{"meter_local_time": "2026-11-25T12:00", "meter_summer_time": b}
+                                  for b in (False, True, True, False, False, False)]
+        ser = FakeSerial()
+        result = sync_once("/dev/ttyUSB0", 2400, 7, "12345678", "Europe/Oslo",
+                           serial_factory=lambda *a, **k: ser, sleep=lambda _: None,
+                           now=lambda: local, test_dst=True)
+        self.assertEqual(result["dst_test_results"], {"1": True, "0": True})
+        self.assertTrue(result["clock_restored"])
+        self.assertEqual([f[10] & 0x80 for f in ser.sent], [0x80, 0, 0])

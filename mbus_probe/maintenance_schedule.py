@@ -14,6 +14,7 @@ import time
 from datetime import datetime, timezone, timedelta
 from history_controller import history_file
 from zoneinfo import ZoneInfo
+from clock_model import seasonal_key
 
 LOG = logging.getLogger("mbus.maintenance")
 
@@ -43,14 +44,14 @@ class MaintenanceSchedule:
     def _done(self, key):
         kind, meter_id, period = key
         return key in self.completed or (period != "startup" and
-            self.calendar.get(self._calendar_key(kind, meter_id)) == period)
+            self.calendar.get(self._calendar_key("dst" if period.startswith("dst-") else kind, meter_id)) == period)
 
     def _record(self, key):
         self.completed.add(key)
         kind, meter_id, period = key
         if period == "startup":
             return
-        self.calendar[self._calendar_key(kind, meter_id)] = period
+        self.calendar[self._calendar_key("dst" if period.startswith("dst-") else kind, meter_id)] = period
         try:
             self.root.mkdir(parents=True, exist_ok=True)
             temp = self.path.with_suffix(".tmp")
@@ -117,6 +118,12 @@ class MaintenanceSchedule:
             key = ("clock", meter_id, "startup")
             if not self._done(key):
                 yield key
+            # Check the seasonal policy after a restart or transition, even after downtime.
+            period = "dst-" + seasonal_key(local, self.config.get("clock_timezone", "Europe/Oslo"),
+                                            self.config.get("use_daylight_saving_time", True))
+            key = ("clock", meter_id, period)
+            if not self._done(key) and self.clock_observations.get(meter_id, {}).get("clock_dst_mismatch") is True:
+                yield key
             key = ("clock", meter_id, date)
             if local.day == 15 and local.hour == 23 and not self._done(key):
                 yield key
@@ -150,7 +157,9 @@ class MaintenanceSchedule:
                     if observation.get("clock_out_of_sync") is not True:
                         continue
                     offset = observation.get("clock_offset_seconds")
-                    if offset is None or abs(offset) > 300:
+                    if offset is None or (abs(offset) > 300 and not (
+                            key[2].startswith("dst-") and observation.get("clock_dst_mismatch") is True
+                            and abs(abs(offset) - 3600) <= 300)):
                         self._record(key)
                         LOG.warning("Meter clock requires manual verification")
                         continue

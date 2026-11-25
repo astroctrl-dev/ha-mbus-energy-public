@@ -53,3 +53,6 @@ configuration:
   mqtt_password:
     name: "MQTT password"
     description: "Password for MQTT authentication."
+  use_daylight_saving_time:
+    name: "Use daylight saving time"
+    description: "Follow seasonal time changes in the selected timezone."

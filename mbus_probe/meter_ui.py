@@ -10,6 +10,7 @@ from meter_discovery import scan_bus
 from analysis_export import load_samples, make_xlsx
 from history_controller import HistoryController, load_history
 from clock_maintenance import ClockController
+from clock_model import configured_local
 from mqtt_bridge import publish_history
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -86,7 +87,7 @@ async function refresh() {
     document.getElementById('clock-status').textContent =
       `Klokke: ${localText(state.clock.status)}. Systemtid nå: ${state.clock_target}. ` +
       (state.clock.result ? `Før: ${state.clock.result.before || '—'}, mål: ${state.clock.result.target || 'ingen endring'}, etter: ${state.clock.result.after || '—'}. ` : '') +
-      (localText(state.clock.error) || '');
+      (state.clock.result && state.clock.result.dst_test ? `DST 1: ${state.clock.result.dst_test_results?.["1"] === true ? "PASS" : "FAIL"}; DST 0: ${state.clock.result.dst_test_results?.["0"] === true ? "PASS" : "FAIL"}; restored: ${state.clock.result.clock_restored ? "PASS" : "FAIL"}. ` : '') + (localText(state.clock.error) || '');
     if (state.history.status === 'complete' && state.history.captured_at_utc !== lastHistoryCapture) {
       lastHistoryCapture = state.history.captured_at_utc;
       await refreshHistory();
@@ -126,6 +127,13 @@ async function refresh() {
           });
           clock.disabled = !state.clock_enabled || state.clock.status === 'running' || state.history.status === 'running';
           line.append(clock);
+           const dst = button('Test DST write', async () => {
+             if (!confirm('Test both DST bits, then restore configured time? This temporarily writes an incorrect DST bit.')) return;
+             try { await call('/api/clock', {meter_id:item.meter_id, confirm:true, test_dst:true}); await refresh(); }
+             catch(e) { document.getElementById('error').textContent=e.message; }
+           });
+           dst.disabled = clock.disabled;
+           line.append(dst);
         }
         else if (item.supported) line.append(button('Legg til', () => act('/api/select', item.meter_id)));
         else line.append(' (ikke støttet)');
@@ -237,7 +245,7 @@ def serve(registry, config, client, bus_lock, stop, port=8099, history_controlle
                                  "clock": clock_controller.snapshot(),
                                  "clock_enabled": config.get("allow_clock_sync", False),
                                  "auto_clock_sync": config.get("auto_clock_sync", False),
-                                 "clock_target": datetime.now(ZoneInfo(config.get("clock_timezone", "Europe/Oslo"))).isoformat(timespec="minutes")})
+                                 "clock_target": configured_local(datetime.now(ZoneInfo("UTC")), config.get("clock_timezone", "Europe/Oslo"), config.get("use_daylight_saving_time", True)).isoformat(timespec="minutes")})
             elif self.path.rstrip("/").endswith("/api/history"):
                 try:
                     entries = [{"alias": alias, "snapshot": snapshot} for alias, snapshot in
@@ -316,7 +324,7 @@ def serve(registry, config, client, bus_lock, stop, port=8099, history_controlle
                         raise ValueError("migrate saved history before clock synchronization")
                     if data.get("confirm") is not True:
                         raise ValueError("clock write requires explicit confirmation")
-                    clock_controller.start(meter_id)
+                    clock_controller.start(meter_id, test_dst=data.get("test_dst") is True)
                 elif route == "select":
                     registry.select(meter_id)
                 elif route == "auto":
