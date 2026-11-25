@@ -195,7 +195,46 @@ class HistoryController:
                 LOG.warning("Migration saved; MQTT publication pending")
         return snapshot
 
-    def collect_archive_dev(self, meter_id, month_back, *, approved=False, reader=None):
+    def start_extended_archive(self, meter_id, *, confirmed=False):
+        """Manual, resumable extended archive. No automatic caller."""
+        if confirmed is not True or self.config.get("allow_monthly_history") is not True:
+            raise ValueError("monthly archive requires confirmation and enabled history")
+        if not shared_timing_active():
+            raise ValueError("shared bus timing required")
+        with self.lock:
+            if self.state["status"] == "running" or self.stop.is_set() or self.blocked.is_set():
+                raise ValueError("history unavailable")
+            if self.migration_status(meter_id) != "complete":
+                raise ValueError("retrieve ordinary monthly history first")
+            self.state = {"status":"running","error":None,"captured_at_utc":None}
+            self.worker = threading.Thread(target=self._extended_archive_worker,args=(meter_id,),daemon=True)
+            self.worker.start()
+
+    def _extended_archive_worker(self, meter_id):
+        try:
+            path = history_file(self.root,meter_id)
+            saved = json.loads(path.read_text(encoding="utf-8"))
+            for row in saved["stands"]:
+                if self.stop.is_set():
+                    raise ValueError("archive stopped")
+                evidence = row.get("frame4") or {}
+                maxima = evidence.get("maxima") or {}
+                if (evidence.get("cumulative_m3") is not None and evidence.get("meter_storage_local_time")
+                    and all(maxima.get(k,{}).get("value") is not None and
+                            maxima.get(k,{}).get("meter_local_time") and maxima.get(k,{}).get("read_at_utc")
+                            for k in ("power","flow","flow_temperature","return_temperature"))):
+                    continue
+                saved = self.collect_archive_dev(meter_id,row["month_back"],approved=True,_reserved=True)
+            with self.lock:
+                self.state = {"status":"complete","error":None,"captured_at_utc":saved["captured_at_utc"]}
+        except Exception as exc:
+            LOG.warning("Extended archive stopped: %s",type(exc).__name__)
+            with self.lock:
+                self.state = {"status":"restore_unverified" if self.blocked.is_set() or self.marker.exists() else "failed",
+                              "error":"Extended archive stopped; previously saved data retained",
+                              "captured_at_utc":None}
+
+    def collect_archive_dev(self, meter_id, month_back, *, approved=False, reader=None, _reserved=False):
         """Single dev transaction only. No GUI, polling or startup caller.
         Explicit approval and shared timing mandatory; serialize against all
         collection and retain the existing durable normal-frame guard on failure.
@@ -210,7 +249,7 @@ class HistoryController:
             from archive_serial import read_archive
             reader = read_archive
         with self.lock:
-            if self.state["status"] == "running" or self.stop.is_set() or self.blocked.is_set():
+            if (self.state["status"] == "running" and not _reserved) or self.stop.is_set() or self.blocked.is_set():
                 raise ValueError("history unavailable")
             self.state = {"status":"running","error":None,"captured_at_utc":None}
         try:
@@ -246,9 +285,15 @@ class HistoryController:
                         self.blocked.set()
                         raise
                     save_snapshot(path,updated)
+            if self.on_complete:
+                try:
+                    self.on_complete(meter_id,updated)
+                except (OSError,ValueError,ConnectionError,RuntimeError):
+                    LOG.warning("Archive saved; MQTT publication pending")
             with self.lock:
-                self.state = {"status":"complete","error":None,
-                              "captured_at_utc":updated["captured_at_utc"]}
+                self.state = {"status":"running" if _reserved else "complete","error":None,
+                              "captured_at_utc":updated["captured_at_utc"],
+                              "archive_position":month_back}
             return updated
         except Exception:
             with self.lock:

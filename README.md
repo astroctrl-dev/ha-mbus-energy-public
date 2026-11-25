@@ -1,3 +1,7 @@
+## v2.9.0-beta.3
+
+Manual Retrieve Monthly Archive now reads missing extended monthly records on meters with complete saved energy history. Saves and publishes each successfully validated month after restoring normal operation. Stops on first rejected record; existing data retained. Full collection can take over 90 minutes. Physical frame 4 validation remains pending; frame 5 battery acquisition is not enabled. No automatic extended collection.
+
 ## v2.9.0-beta.2
 
 Simplifies monthly consumption sensor attributes to ten top-level fields including Home Assistant metadata. Preserves sensor IDs, energy states and internal read provenance. Monthly maxima share a read timestamp only when all four were read together. Actual instrument archive date takes precedence when available. Frame 4 and 5 physical collection remains disabled; no additional bus requests.

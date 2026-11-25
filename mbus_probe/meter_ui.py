@@ -94,7 +94,7 @@ async function refresh() {
     document.getElementById('status').textContent =
       `Søk: ${localText(state.scan_status)}, adresser sjekket: ${state.scan_progress}/251, ` +
       `uavklarte svar: ${state.scan_errors.length}, opprydding venter: ${state.cleanup_pending}. ` +
-      `Historikk: ${localText(state.history.status)}` + (state.history.error ? ` – ${localText(state.history.error)}` : '');
+      `Historikk: ${localText(state.history.status)}` + (state.history.archive_position ? ` — archive ${state.history.archive_position}/24` : '') + (state.history.error ? ` – ${localText(state.history.error)}` : '');
     document.getElementById('clock-status').textContent =
       `Klokke: ${localText(state.clock.status)}. Systemtid nå: ${state.clock_target}. ` +
       (state.clock.result ? `Før: ${state.clock.result.before || '—'}, mål: ${state.clock.result.target || 'ingen endring'}, etter: ${state.clock.result.after || '—'}. ` : '') +
@@ -123,8 +123,9 @@ async function refresh() {
           line.append(diagnostic);
           line.append(button('Fjern', () => act('/api/remove', item.meter_id)));
           const hist = button('Hent månedshistorikk', async () => {
-            if (!confirm('Dette bytter midlertidig M-Bus-ramme (CI=50h/03h), leser historikk og gjenoppretter normalrammen. Avlesningen tar noen minutter. Fortsette?')) return;
-            await act('/api/history', item.meter_id);
+            if (!confirm('Read monthly archive? Existing energy history is preserved. Missing extended months are read individually; a full archive can require over 90 minutes. Normal polling may pause. Continue?')) return;
+            try { await call('/api/history', {meter_id:item.meter_id, confirm:true}); await refresh(); }
+            catch (e) { document.getElementById('error').textContent=e.message; }
           });
           const migration = state.migrations[item.meter_id];
           hist.disabled = !state.history_enabled || state.history.status === 'running' || migration === "pending" || migration === "invalid";
@@ -341,7 +342,10 @@ def serve(registry, config, client, bus_lock, stop, port=8099, history_controlle
                 elif route == "migrate":
                     history_controller.migrate(meter_id)
                 elif route == "history":
-                    history_controller.start(meter_id)
+                    if history_controller.migration_status(meter_id) == "complete":
+                        history_controller.start_extended_archive(meter_id,confirmed=data.get("confirm"))
+                    else:
+                        history_controller.start(meter_id)
                 elif route == "clock":
                     if history_controller.migration_status(meter_id) in ("pending", "invalid"):
                         raise ValueError("migrate saved history before clock synchronization")

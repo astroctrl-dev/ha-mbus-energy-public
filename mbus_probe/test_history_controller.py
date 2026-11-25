@@ -211,3 +211,27 @@ class ArchiveControllerTests(unittest.TestCase):
         self.assertEqual(self.path.read_bytes(),self.original)
         self.assertTrue(self.controller.blocked.is_set())
         self.assertTrue(self.controller.marker.exists())
+
+    def test_extended_archive_requires_confirmation(self):
+        with patch("history_controller.shared_timing_active",return_value=True):
+            with self.assertRaises(ValueError):
+                self.controller.start_extended_archive("00000000")
+        self.assertEqual(self.path.read_bytes(),self.original)
+
+    def test_extended_archive_stops_on_first_rejection(self):
+        from archive_acquisition import ArchiveDataError
+        with patch("history_controller.shared_timing_active",return_value=True), \
+             patch.object(self.controller,"collect_archive_dev",side_effect=ArchiveDataError("bad")) as read:
+            self.controller.start_extended_archive("00000000",confirmed=True)
+            self.controller.worker.join(2)
+            read.assert_called_once_with("00000000",1,approved=True,_reserved=True)
+        self.assertEqual(self.controller.snapshot()["status"],"failed")
+        self.assertEqual(self.path.read_bytes(),self.original)
+
+    def test_extended_archive_manual_reads_all_positions(self):
+        with patch("history_controller.shared_timing_active",return_value=True), \
+             patch.object(self.controller,"collect_archive_dev",return_value=self.saved) as read:
+            self.controller.start_extended_archive("00000000",confirmed=True)
+            self.controller.worker.join(2)
+            self.assertEqual([c.args[1] for c in read.call_args_list],list(range(1,25)))
+        self.assertEqual(self.controller.snapshot()["status"],"complete")
