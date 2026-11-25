@@ -169,3 +169,90 @@ def decode_records(data):
             record.update(kind="vendor_diagnostic_opaque", label_hex=label_hex)
         result.append(record)
     return result
+
+
+def passive_diagnostics(decoded):
+    """Project exact current T230 timing records, without extra bus requests.
+
+    Unknown, duplicate or malformed records produce None, not stale values.
+    The header status is a raw byte, not an inferred fault or battery state.
+    """
+    result = {}
+    for key, vif in (("flow_measurement_interval_seconds", 0x74),
+                     ("flow_averaging_interval_seconds", 0x70)):
+        matches = [r for r in decoded.get("records", ())
+                   if r.get("dif") == 0x09 and r.get("vif") == vif
+                   and r.get("current_record") is True
+                   and r.get("dife_hex") == "" and r.get("vife_hex") == ""]
+        value = matches[0].get("value") if len(matches) == 1 else None
+        result[key] = int(value) if (type(value) in (int, float)
+            and 0 < value <= 99 and value == int(value)
+            and matches[0].get("unit") == "s") else None
+    footer = t230_footer(decoded, 1)
+    result["firmware_version"] = footer["firmware_version"] if footer else None
+    result["extension_byte"] = footer["extension_byte"] if footer else None
+    return result
+
+
+def t230_footer(decoded, expected_frame):
+    """TKB3462 pp. 19–23: exact six-byte manufacturer footer."""
+    records = decoded.get("records", ())
+    tails = [r for r in records if r.get("kind") == "manufacturer_specific"]
+    if len(tails) != 1 or tails[0] is not records[-1]:
+        return None
+    try:
+        raw = bytes.fromhex(tails[0].get("raw_hex", ""))
+    except (TypeError, ValueError):
+        return None
+    if len(raw) != 6 or raw[0] not in (0x0f, 0x1f) or raw[3] != 0 or raw[5] != expected_frame:
+        return None
+    if any((b >> 4) > 9 or (b & 15) > 9 for b in raw[1:3]):
+        return None
+    return {"firmware_version": f"{raw[2]:02x}.{raw[1]:02x}".lstrip("0"),
+            "extension_byte": f"0x{raw[4]:02X}"}
+
+
+def historical_errors(decoded):
+    """TKB3462 p. 22: last-occurrence wall times, never current faults."""
+    labels = ("FT", "FS", "FE", "FF1", "FF2")
+    result = dict.fromkeys(labels)
+    if not t230_footer(decoded, 2):
+        return result
+    for label in labels:
+        matches = [r for r in decoded.get("records", ())
+                   if r.get("kind") == "vendor_diagnostic_opaque"
+                   and r.get("label_hex") == label[::-1].encode("ascii").hex(" ")]
+        if len(matches) != 1:
+            continue
+        try:
+            raw = bytes.fromhex(matches[0]["raw_hex"])
+            if len(raw) != 4 or raw[0] & 0x80:
+                continue
+            year = (raw[2] >> 5) | ((raw[3] >> 4) << 3)
+            if year > 99:
+                continue
+            result[label] = datetime(2000+year, raw[3]&15, raw[2]&31,
+                                     raw[1]&31, raw[0]&63).isoformat(timespec="minutes")
+        except (KeyError, TypeError, ValueError):
+            pass
+    return result
+
+
+def decode_frame5_flags(extension):
+    """Decode the isolated three-byte ABCDEF field (TKB3462 p.28).
+    
+    Caller must establish its location in a verified frame-5 layout.
+    This function deliberately does not search for FF separators or
+    infer the field position from an unverified manufacturer payload.
+    """
+    if not isinstance(extension, bytes) or len(extension) != 3:
+        raise ValueError("expected exactly three frame-5 extension bytes")
+    ab, cd, ef = extension
+    mask = (cd & 3) << 8 | ef
+    return {
+        "active_fault_codes": [f"F{i}" for i in range(10) if mask & (1 << i)],
+        "battery_exhausted": bool(ef & 0x10),
+        "battery_prewarning": bool(ab & 0x02),
+        "flow_prewarning": bool(ab & 0x01),
+        "battery_status": "exhausted" if ef & 0x10 else "warning" if ab & 2 else "no_warning_reported",
+    }

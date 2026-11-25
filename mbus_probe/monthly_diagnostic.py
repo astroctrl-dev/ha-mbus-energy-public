@@ -123,6 +123,7 @@ def run(port, baud, address, meter_id, timeout=5, *, read_set_day=False, setting
         months = None
         normal_clock = None
         set_day = None
+        error_history = None
         history_read_at_utc = None
         def send(command):
             nonlocal last_request_at
@@ -146,6 +147,9 @@ def run(port, baud, address, meter_id, timeout=5, *, read_set_day=False, setting
                 config_frame = read_response(ser)
                 try:
                     set_day = extract_monthly_set_day(config_frame, address, meter_id)
+                    from mbus_records import historical_errors
+                    error_history = {"last_occurrence_local": historical_errors(validate(config_frame)),
+                                     "read_at_utc": datetime.now(timezone.utc).isoformat()}
                     LOG.info("Monthly set day: %d at %02d:%02d",
                              set_day["day"], set_day["hour"], set_day["minute"])
                 except ValueError:
@@ -192,6 +196,8 @@ def run(port, baud, address, meter_id, timeout=5, *, read_set_day=False, setting
                     raise RestorationError("normal frame not verified; stop polling") from exc
         if (read_set_day or settings_only) and normal_clock is not None:
             normal_clock = dict(normal_clock, monthly_set_day=set_day)
+            if error_history is not None:
+                normal_clock['error_history'] = error_history
         return months, normal_clock, history_read_at_utc
 
 

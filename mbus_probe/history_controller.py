@@ -241,6 +241,8 @@ class HistoryController:
                         raise ValueError("migration required")
                     saved["monthly_set_day"] = observation["monthly_set_day"]
                     saved["configuration_read_at_utc"] = captured_at
+                    if observation.get("error_history") is not None:
+                        saved["error_history"] = observation["error_history"]
                     save_snapshot(path, saved)
                     if self.on_complete:
                         try:
@@ -283,6 +285,10 @@ class HistoryController:
                     previous = json.loads(path.read_text(encoding="utf-8"))
                 except (OSError, ValueError):
                     previous = None
+                if observation and observation.get("error_history") is not None:
+                    snapshot["error_history"] = observation["error_history"]
+                elif previous and "error_history" in previous:
+                    snapshot["error_history"] = previous["error_history"]
                 snapshot["rollover_evidence"] = (
                     "confirmed_shift" if detect_month_shift(previous, snapshot) else "not_observed")
                 snapshot = merge_history(previous, snapshot, history_read_at or captured_at, replace=replace)

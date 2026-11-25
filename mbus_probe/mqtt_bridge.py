@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 
 from ha_measurements import REQUIRED_SENSORS, SENSORS, select_measurements
 from temperature_units import DIFFERENCE
+from mbus_records import passive_diagnostics
 
 HA_UNITS = {"kWh": "kWh", "m3": "m³", "kW": "kW", "m3/h": "m³/h",
             "C": "°C", "K": "K", "h": "h"}
@@ -63,7 +64,7 @@ def discovery_messages(meter_id):
             "availability_mode": "all",
             "entity_category": "diagnostic",
         }
-        if kind == "meter_local_time":
+        if kind in ("meter_local_time", "meter_status"):
             payload["json_attributes_topic"] = f"mbus/t230/{key}/{kind}/attributes"
         if kind == "last_successful_read_utc":
             payload["device_class"] = "timestamp"
@@ -153,6 +154,26 @@ def publish_history(client, meter_id, snapshot):
         if result.rc:
             raise ConnectionError("MQTT history discovery publish failed")
         result.wait_for_publish(timeout=5)
+    errors = snapshot.get("error_history")
+    if isinstance(errors, dict) and isinstance(errors.get("read_at_utc"), str):
+        kind = "meter_error_history"
+        root = f"mbus/t230/{key}/{kind}"
+        payload = {"name": "Meter Error History", "unique_id": f"mbus_t230_{key}_{kind}",
+                   "device": {"identifiers": [f"mbus_t230_{key}"]},
+                   "state_topic": root + "/state", "json_attributes_topic": root + "/attributes",
+                   "device_class": "timestamp", "entity_category": "diagnostic",
+                   "availability": [{"topic": BRIDGE_AVAILABILITY}]}
+        for target, value, retain in (
+                (f"homeassistant/sensor/mbus_t230_{key}_{kind}/config", json.dumps(payload), True),
+                (root + "/attributes", json.dumps({"last_occurrence_local": {
+                    code: errors.get("last_occurrence_local", {}).get(code)
+                    for code in ("FT", "FS", "FE", "FF1", "FF2")},
+                    "time_basis": "meter_local_unspecified", "active_faults": "not_inferred"}), True),
+                (root + "/state", errors["read_at_utc"], True)):
+            result = client.publish(target, value, qos=1, retain=retain)
+            if result.rc:
+                raise ConnectionError("MQTT error history publish failed")
+            result.wait_for_publish(timeout=5)
     setting = snapshot.get("monthly_set_day")
     if isinstance(setting, dict) and all(type(setting.get(k)) is int for k in ("day", "hour", "minute")):
         kind = "monthly_storage_time"
@@ -267,6 +288,12 @@ def publish_reading(client, decoded, meter_id, read_at_utc=None, clock_attribute
         if result.rc:
             raise ConnectionError("MQTT diagnostic publish failed")
         result.wait_for_publish(timeout=5)
+    result = client.publish(f"mbus/t230/{key}/meter_status/attributes",
+                            json.dumps({**passive_diagnostics(decoded), "read_at_utc": read_at_utc}),
+                            qos=1, retain=False)
+    if result.rc:
+        raise ConnectionError("MQTT meter diagnostic attributes publish failed")
+    result.wait_for_publish(timeout=5)
     if clock_attributes is not None:
         result = client.publish(f"mbus/t230/{key}/meter_local_time/attributes",
                                 json.dumps(clock_attributes), qos=1, retain=False)
@@ -288,7 +315,11 @@ def mark_unavailable(client, meter_id):
 def cleanup_discovery(client, meter_id):
     """Remove retained discovery on explicit uninstall or identity change."""
     mark_unavailable(client, meter_id).wait_for_publish(timeout=5)
-    for topic, _, _ in list(discovery_messages(meter_id)) + list(history_discovery_messages(meter_id)):
+    key = device_key(meter_id)
+    history_cleanup = [(f"homeassistant/sensor/mbus_t230_{key}_meter_error_history/config", "", True),
+                       (f"mbus/t230/{key}/meter_error_history/state", "", True),
+                       (f"mbus/t230/{key}/meter_error_history/attributes", "", True)]
+    for topic, _, _ in list(discovery_messages(meter_id)) + list(history_discovery_messages(meter_id)) + history_cleanup:
         result = client.publish(topic, "", qos=1, retain=True)
         if result.rc:
             raise ConnectionError("MQTT discovery cleanup failed")

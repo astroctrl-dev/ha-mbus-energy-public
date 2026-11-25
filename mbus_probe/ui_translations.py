@@ -15,3 +15,8 @@ STATUS_TEXT.update({
     "DST_INACTIVE": {"en-GB": "Inactive", "nb-NO": "Inaktiv", "nn-NO": "Inaktiv", "de-DE": "Inaktiv"},
     "DST_UNKNOWN": {"en-GB": "Unknown", "nb-NO": "Ukjent", "nn-NO": "Ukjend", "de-DE": "Unbekannt"},
 })
+
+STATUS_TEXT.update({
+    "ERROR_HISTORY_TITLE": {"en-GB": "Error history read at (UTC)", "nb-NO": "Feilhistorikk avlest (UTC)", "nn-NO": "Feilhistorikk avlesen (UTC)", "de-DE": "Fehlerhistorie ausgelesen (UTC)"},
+    "ERROR_HISTORY_NOTE": {"en-GB": "Last occurrences in meter local time; not active fault status.", "nb-NO": "Siste hendelser i lokal målertid; ikke aktiv feilstatus.", "nn-NO": "Siste hendingar i lokal målartid; ikkje aktiv feilstatus.", "de-DE": "Letzte Ereignisse in lokaler Zählerzeit; kein aktiver Fehlerstatus."},
+})

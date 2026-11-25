@@ -66,7 +66,7 @@ class MqttTests(unittest.TestCase):
         client = FakeClient()
         values = publish_reading(client, self.decoded, "00000000")
         self.assertEqual(values["energy"], 12345)
-        self.assertEqual(len(client.messages), 33)
+        self.assertEqual(len(client.messages), 34)
         self.assertEqual(client.messages[-1],
                          (availability_topic(device_key("00000000")), "online", 1, True))
         self.assertFalse(any("wrong_installation" in t for t, _, _, _ in client.messages))
@@ -203,6 +203,80 @@ class MqttTests(unittest.TestCase):
     def test_explicit_cleanup_clears_retained_discovery(self):
         client = FakeClient()
         cleanup_discovery(client, "00000000")
-        self.assertEqual(len(client.messages), 65)
+        self.assertEqual(len(client.messages), 68)
         self.assertTrue(all(payload == "" and retain
                             for _, payload, _, retain in client.messages[1:]))
+
+
+class PassiveDiagnosticsTests(unittest.TestCase):
+    def test_timing_projection_and_unknown(self):
+        from mbus_records import decode_records, passive_diagnostics
+        records = decode_records(bytes.fromhex("09 74 04 09 70 08"))
+        self.assertEqual(passive_diagnostics({"records": records}), {
+            "flow_measurement_interval_seconds": 4,
+            "flow_averaging_interval_seconds": 8, "firmware_version": None,
+            "extension_byte": None})
+        self.assertIsNone(passive_diagnostics({"records": records + records})[
+            "flow_measurement_interval_seconds"])
+        self.assertIsNone(passive_diagnostics({"records": decode_records(
+            bytes.fromhex("09 74 ff"))})["flow_measurement_interval_seconds"])
+        self.assertIsNone(passive_diagnostics({"records": []})[
+            "flow_averaging_interval_seconds"])
+
+    def test_mqtt_attributes_and_identity(self):
+        from mbus_records import decode_records
+        decoded = validate(bytes.fromhex(Path(__file__).with_name(
+            "fixture_t230_sanitized.hex").read_text()))
+        decoded["records"] = [r for r in decoded["records"]
+                              if r.get("vif") not in (0x70, 0x74)]
+        decoded["records"] += decode_records(bytes.fromhex("09 74 04 09 70 08"))
+        client = FakeClient()
+        publish_reading(client, decoded, "00000000")
+        attrs = [json.loads(p) for t,p,_,_ in client.messages
+                 if t.endswith("/meter_status/attributes")]
+        self.assertEqual(attrs[0]["flow_measurement_interval_seconds"], 4)
+        self.assertEqual(attrs[0]["flow_averaging_interval_seconds"], 8)
+        config = [json.loads(p) for t,p,_ in discovery_messages("00000000")
+                  if t.endswith("_meter_status/config")][0]
+        self.assertEqual(config["json_attributes_topic"],
+                         f"mbus/t230/{device_key('00000000')}/meter_status/attributes")
+
+
+class FooterAndHistoryTests(unittest.TestCase):
+    def test_firmware_and_frame_guard(self):
+        from mbus_records import decode_records, passive_diagnostics, t230_footer
+        decoded = {"records": decode_records(bytes.fromhex("0f 12 07 00 62 01"))}
+        self.assertEqual(passive_diagnostics(decoded)["firmware_version"], "7.12")
+        self.assertEqual(passive_diagnostics(decoded)["extension_byte"], "0x62")
+        self.assertIsNone(t230_footer(decoded, 2))
+        self.assertIsNone(t230_footer({"records": decode_records(
+            bytes.fromhex("0f fa 07 00 62 01"))}, 1))
+
+    def test_history_labels_and_invalid_dates(self):
+        from mbus_records import decode_records, historical_errors
+        decoded = {"records": decode_records(bytes.fromhex(
+            "34 fc 6e 02 54 46 03 13 56 3b "
+            "34 fc 6e 02 53 46 00 00 00 00 "
+            "34 fc 6e 02 45 46 00 00 41 3b "
+            "34 fc 6e 03 31 46 46 00 00 41 3b "
+            "34 fc 6e 03 32 46 46 20 10 56 3b 0f 12 07 00 63 02"))}
+        result = historical_errors(decoded)
+        self.assertEqual(result["FT"], "2026-11-22T19:03")
+        self.assertIsNone(result["FS"])
+        self.assertEqual(result["FF2"], "2026-11-22T16:32")
+        self.assertEqual(result["FE"], "2026-11-01T00:00")
+
+class ErrorHistoryPublicationTests(unittest.TestCase):
+    def test_saved_history_is_timestamp_not_active_alarm(self):
+        from history_model import build_snapshot
+        snap = build_snapshot([{"month_back":n,"value":1000-10*n,"unit":"kWh"}
+                               for n in range(1,25)], "2026-11-23T03:00:00Z")
+        snap["error_history"] = {"read_at_utc":"2026-11-25T10:00:00+00:00",
+                                 "last_occurrence_local":{"FT":"2026-11-22T19:03"}}
+        client = FakeClient()
+        publish_history(client, "12345678", snap)
+        attrs = next(json.loads(p) for t,p,_,_ in client.messages
+                     if t.endswith("/meter_error_history/attributes"))
+        self.assertEqual(attrs["last_occurrence_local"]["FT"], "2026-11-22T19:03")
+        self.assertIsNone(attrs["last_occurrence_local"]["FS"])
+        self.assertEqual(attrs["active_faults"], "not_inferred")

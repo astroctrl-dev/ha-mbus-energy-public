@@ -1,6 +1,6 @@
-# Current app update: v2.7.5 (stable)
+# Current app update: v2.8.0-beta.1 (beta)
 
-The meter always follows Home Assistant local wall time. The optional fixed standard-time setting has been retired. Seasonal checks run on the next eligible valid polling round, subject to clock-write permissions and bus spacing. Back up before updating. Actual seasonal transition and active alarm persistence remain physically unverified. Clock readings retain minute resolution. See [changelog](mbus_probe/CHANGELOG.md).
+This update adds passive flow measurement and averaging intervals, firmware diagnostics, and last-occurrence error history using the existing frame-2 retrieval. The Home Assistant Meter Error History entity records the capture time, not an active fault. Excel adds Diagnostics and Error history sheets when data is available. No extra bus requests or battery estimates. Frame-5 acquisition and active battery warnings are not enabled; physical validation is pending. Back up before updating. See [changelog](mbus_probe/CHANGELOG.md).
 
 # M-Bus T230 energy metering for Home Assistant
 

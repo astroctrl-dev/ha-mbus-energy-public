@@ -1,3 +1,11 @@
+# 2.8.0-beta.1
+
+- Add flow measurement and averaging intervals, firmware version and raw extension byte to the existing meter status attributes.
+- Decode and preserve frame-2 historical last-occurrence times; expose them in Home Assistant, ingress and Excel, distinct from active faults.
+- Add diagnostic export with existing measurement logging; retain previous sheets and identifiers.
+- Include a standalone tested frame-5 flag decoder, not connected to runtime acquisition. Battery warnings and percentage are not yet exposed. No estimated battery life.
+- No additional bus transactions. Automated private CI passed; physical validation pending.
+
 # 2.7.5
 
 - Always follow Home Assistant local time, including seasonal changes.

@@ -45,6 +45,16 @@ async function refreshHistory() {
       ? 'Månedsskifte bekreftet ved forskyvning av alle 24 arkivposisjoner.'
       : 'Månedsskifte ikke bekreftet ved sammenligning med forrige avlesning.';
     area.append(evidence);
+    const errors = entry.snapshot.error_history;
+    if (errors) {
+      const label = document.createElement("p");
+      label.textContent = localText("ERROR_HISTORY_TITLE") + ": " + (errors.read_at_utc ?? "—");
+      area.append(label);
+      const list = document.createElement("p");
+      list.textContent = ["FT","FS","FE","FF1","FF2"].map(code => code + ": " + (errors.last_occurrence_local?.[code] ?? localText("DST_UNKNOWN"))).join("; ");
+      area.append(list);
+      const note = document.createElement("p"); note.textContent = localText("ERROR_HISTORY_NOTE"); area.append(note);
+    }
     const wrap = document.createElement('div'); wrap.className = 'table-wrap';
     const table = document.createElement('table'); const head = document.createElement('tr');
     for (const label of ['Posisjon', 'Målerstand (kWh)', 'Forbruk siden neste eldre stand (kWh)', 'Avregningsdato']) addCell(head, label, true);

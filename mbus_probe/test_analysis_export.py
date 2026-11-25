@@ -53,7 +53,7 @@ class AnalysisExportTests(unittest.TestCase):
                                  Path(tmp) / "alias.key")
             payload = make_xlsx([sample])
         wb = load_workbook(BytesIO(payload), read_only=True, data_only=True)
-        self.assertEqual(wb.sheetnames, ["Info", "Normal records"])
+        self.assertEqual(wb.sheetnames, ["Info", "Normal records", "Diagnostics"])
         rows = list(wb["Normal records"].values)
         self.assertEqual(rows[0][0:3], ("alias", "read_at_utc", "meter_local_time"))
         energy = [r for r in rows[1:] if r[5] == "energy" and r[6] == 0 and r[7] == 0]
@@ -118,3 +118,16 @@ class AnalysisExportTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class DiagnosticExportTests(unittest.TestCase):
+    def test_history_export_preserves_unknown_and_local_time(self):
+        from history_model import build_snapshot
+        snap = build_snapshot([{"month_back":n,"value":1000-10*n,"unit":"kWh"}
+                               for n in range(1,25)], "2026-11-23T03:00:00Z")
+        snap["error_history"] = {"read_at_utc":"2026-11-25T10:00:00+00:00",
+                                 "last_occurrence_local":{"FT":"2026-11-22T19:03"}}
+        wb = load_workbook(BytesIO(make_xlsx([], snap)), read_only=True, data_only=True)
+        rows = list(wb["Error history"].values)
+        self.assertEqual(rows[1][2:], ("FT", "2026-11-22T19:03", "not_inferred"))
+        self.assertIsNone(rows[2][3])
+        wb.close()

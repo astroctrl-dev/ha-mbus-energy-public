@@ -8,6 +8,7 @@ from hashlib import sha256
 from io import BytesIO
 from pathlib import Path
 from ha_measurements import SENSORS
+from mbus_records import passive_diagnostics
 from i18n import resolve_language
 from temperature_units import convert_temperature, UNITS
 
@@ -146,7 +147,8 @@ def make_sample(decoded, meter_id, read_at, alias_key, validated=None):
     return {"alias": _alias(meter_id, alias_key),
             "read_at_utc": stamp.astimezone(timezone.utc).isoformat(),
             "meter_local_time": local_time, "summer_time": summer_time,
-            "status": decoded["status"], "records": records}
+            "status": decoded["status"], "records": records,
+            "diagnostics": passive_diagnostics(decoded)}
 
 
 def append_sample(path, sample, limit=1000):
@@ -202,6 +204,15 @@ def make_xlsx(samples, history=None, language='en-GB', temperature_unit=None):
                        sample.get("meter_local_time"), sample.get("summer_time"),
                        sample["status"], r["kind"], r["storage"], r["tariff"],
                        r["subunit"], r["function"], value, unit))
+    if any("diagnostics" in sample for sample in samples):
+        diag = wb.create_sheet("Diagnostics")
+        diag.append(("alias", "read_at_utc", "flow_measurement_interval_seconds",
+                     "flow_averaging_interval_seconds", "firmware_version", "extension_byte"))
+        for sample in samples:
+            data = sample.get("diagnostics", {})
+            diag.append((sample["alias"], sample["read_at_utc"]) + tuple(
+                data.get(key) for key in ("flow_measurement_interval_seconds",
+                "flow_averaging_interval_seconds", "firmware_version", "extension_byte")))
     if history:
         histories = [("", history)] if isinstance(history, dict) else list(history)
         stands = wb.create_sheet("Månedshistorikk")
@@ -212,7 +223,16 @@ def make_xlsx(samples, history=None, language='en-GB', temperature_unit=None):
         periods.append(("alias", "newer_storage", "older_storage", "period_kwh",
                         "meter_start_date", "meter_end_date", "estimated_start_date",
                         "estimated_end_date", "date_source", "rollover_evidence"))
+        errors = None
+        if any(snapshot.get("error_history") for _, snapshot in histories):
+            errors = wb.create_sheet("Error history")
+            errors.append(("alias", "read_at_utc", "code", "last_occurrence_meter_local", "active_status"))
         for alias, snapshot in histories:
+            if errors is not None and snapshot.get("error_history"):
+                data = snapshot["error_history"]
+                for code in ("FT", "FS", "FE", "FF1", "FF2"):
+                    errors.append((alias, data.get("read_at_utc"), code,
+                                   data.get("last_occurrence_local", {}).get(code), "not_inferred"))
             provenance = snapshot.get("date_provenance", {})
             for field in ("history_read_at_utc", "normal_read_at_utc",
                           "meter_local_time_at_normal", "meter_summer_time_at_normal",
