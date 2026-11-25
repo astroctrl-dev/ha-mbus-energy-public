@@ -1,3 +1,10 @@
+# 2.7.5
+
+- Always follow Home Assistant local time, including seasonal changes.
+- Remove optional daylight-saving-time configuration and translations; ignore legacy values during upgrade.
+- Preserve manual and monthly clock synchronization, seasonal checks, permissions, diagnostics and history.
+- Private automated CI passed; physical upgrade and actual seasonal transition remain to be verified.
+
 # 2.7.4
 
 - Promotes 2.7.4-beta.1 without runtime code changes.

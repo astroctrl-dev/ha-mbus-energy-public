@@ -53,6 +53,3 @@ configuration:
   mqtt_password:
     name: "MQTT-passord"
     description: "Passord for MQTT-autentisering."
-  use_daylight_saving_time:
-    name: "Bruk sommartid"
-    description: "Følg sesongvise tidsendringar i vald tidssone."

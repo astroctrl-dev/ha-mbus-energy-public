@@ -277,7 +277,7 @@ class ClockController:
                         address, meter_id, self.config.get("clock_timezone", "Europe/Oslo"),
                         on_write=on_write, auto=auto,
                         allow_auto_write=self._trusted(meter_id),
-                        use_dst=self.config.get("use_daylight_saving_time", True), test_dst=test_dst,
+                        use_dst=True, test_dst=test_dst,
                         **({"seasonal_shift": seasonal_shift} if seasonal_shift is not None else {}))
                 finally:
                     if not shared_timing_active():

@@ -157,7 +157,7 @@ class ScheduleTests(unittest.TestCase):
         self.assertFalse(store.load()["dst_clock_override"])
 
 
-    def test_standard_time_seasonal_check(self):
+    def test_legacy_fixed_time_option_does_not_disable_seasonal_check(self):
         from dst_transition import TransitionStore
         self.schedule.config.update(use_daylight_saving_time=False,
                                     auto_monthly_history=False, auto_clock_sync=False)
@@ -169,6 +169,7 @@ class ScheduleTests(unittest.TestCase):
         self.schedule.on_valid_round([meter])
         store = TransitionStore(self.tmp.name, meter)
         self.assertFalse(store.load()["dst_transition_failed"])
+        self.assertEqual(store.load()["policy"], "Europe/Oslo:True")
         self.assertEqual(self.clock.calls, [])
 
     def test_catch_up_after_restart_and_intervention_does_not_clear_latch(self):

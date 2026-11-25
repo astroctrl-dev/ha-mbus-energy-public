@@ -258,7 +258,7 @@ def serve(registry, config, client, bus_lock, stop, port=8099, history_controlle
                                  "clock": clock_controller.snapshot(),
                                  "clock_enabled": config.get("allow_clock_sync", False),
                                  "auto_clock_sync": config.get("auto_clock_sync", False),
-                                 "clock_target": configured_local(datetime.now(ZoneInfo("UTC")), config.get("clock_timezone", "Europe/Oslo"), config.get("use_daylight_saving_time", True)).isoformat(timespec="minutes")})
+                                 "clock_target": configured_local(datetime.now(ZoneInfo("UTC")), config.get("clock_timezone", "Europe/Oslo")).isoformat(timespec="minutes")})
             elif self.path.rstrip("/").endswith("/api/history"):
                 try:
                     entries = [{"alias": alias, "snapshot": snapshot} for alias, snapshot in

@@ -136,15 +136,11 @@ class MaintenanceSchedule:
         """Consume at most one observed seasonal transition, before any write."""
         if hasattr(self.history, "migration_status") and self.history.migration_status(meter_id) in ("pending", "invalid"):
             return None
-        enabled = self.config.get("use_daylight_saving_time", True)
         zone = self.config.get("clock_timezone", "Europe/Oslo")
         transition = latest_transition(local, zone)
-        if transition and not enabled:
-            transition = dict(transition, shift_seconds=-transition["shift_seconds"],
-                              expected_dst=False, policy="standard_time")
         store = TransitionStore(self.root, meter_id)
         try:
-            state = store.establish_baseline(transition, f"{zone}:{enabled}")
+            state = store.establish_baseline(transition, f"{zone}:True")
             if not transition or state["last_transition"] == transition["key"]:
                 return None
             observation = self.clock_observations.get(meter_id, {})

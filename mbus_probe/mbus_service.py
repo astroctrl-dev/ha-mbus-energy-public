@@ -78,8 +78,8 @@ def load_config(path="/data/options.json"):
         raise ValueError("interval_seconds must be one of 90, 120, 300, 600")
     if not isinstance(config.get("allow_clock_sync", False), bool) or not isinstance(config.get("auto_clock_sync", False), bool):
         raise ValueError("clock sync options must be boolean")
-    if not isinstance(config.get("use_daylight_saving_time", True), bool):
-        raise ValueError("use_daylight_saving_time must be boolean")
+    # Legacy options must never override the HA wall-clock policy.
+    config.pop("use_daylight_saving_time", None)
     if config.get("auto_clock_sync") and not config.get("allow_clock_sync"):
         raise ValueError("auto_clock_sync requires allow_clock_sync")
     from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -126,7 +126,7 @@ def poll_once(config, client):
             "to avoid flooding the log.", int(config.get("address", 0))
         )
     read_at_utc = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
-    clock_attributes = assess_clock(decoded, read_at_utc, config.get("clock_timezone", "Europe/Oslo"), config.get("use_daylight_saving_time", True))
+    clock_attributes = assess_clock(decoded, read_at_utc, config.get("clock_timezone", "Europe/Oslo"))
     publish_reading(client, decoded, config["meter_id"], read_at_utc=read_at_utc,
                     clock_attributes=clock_attributes)
     observer = config.get("_clock_observer")
