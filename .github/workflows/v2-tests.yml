@@ -25,7 +25,7 @@ jobs:
       - name: Verify runtime imports
         run: docker run --rm --entrypoint python3 mbus-v2-ci -c 'import mbus_service, meter_ui, monthly_diagnostic, analysis_export, history_controller, history_model, clock_model, clock_maintenance'
 
-  publish-beta:
+  publish-stable:
     needs: test-and-build
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
@@ -35,12 +35,12 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Publish tested beta
+      - name: Publish tested stable release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          grep -Fx 'version: "2.6.0-beta.5"' mbus_probe/config.yaml
-          if gh release view v2.6.0-beta.5 >/dev/null 2>&1; then
+          grep -Fx 'version: "2.6.0"' mbus_probe/config.yaml
+          if gh release view v2.6.0 >/dev/null 2>&1; then
             exit 0
           fi
-          gh release create v2.6.0-beta.5 --target "$GITHUB_SHA" --prerelease --title "M-Bus v2.6.0-beta.5" --notes-file RELEASE-2.6.0-beta.5.md
+          gh release create v2.6.0 --target "$GITHUB_SHA" --latest --title "M-Bus v2.6.0" --notes-file RELEASE-2.6.0.md

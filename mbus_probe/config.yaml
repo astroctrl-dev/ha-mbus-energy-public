@@ -1,5 +1,5 @@
 name: "M-Bus T230 energimåling"
-version: "2.6.0-beta.5"
+version: "2.6.0"
 slug: "mbus_probe"
 description: "Read T230 via M-Bus, publish measurements with MQTT Discovery and retrieve history on demand."
 arch:

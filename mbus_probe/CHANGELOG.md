@@ -1,3 +1,9 @@
+# 2.6.0
+
+- Stable promotion of beta.5; no runtime code changes.
+- Physical T230 verification: monthly set day, history retrieval, normal-frame restoration and HA history date attribute demonstrated.
+- Dates are derived, not meter-stamped; actual month rollover and delayed slot behavior remain unverified on hardware.
+
 # 2.6.0-beta.5
 
 - Allow scheduled polls up to ten seconds late, including shifted polls capped at the hour boundary; preserve the minimum bus interval.
