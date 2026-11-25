@@ -3,6 +3,7 @@
 No clock command runs from ordinary polling or history export.
 """
 from bus_timing import write_frame, shared_timing_active
+from raw_telegram_log import capture, classify, operation
 import logging
 import threading
 import time
@@ -49,6 +50,7 @@ def _read_clock(port, baud, address, meter_id, reader):
     return clock_observation(decoded, datetime.now(timezone.utc).isoformat())
 
 
+@operation("clock_sync")
 def sync_once(port, baud, address, meter_id, zone_name, *, reader=read_one,
               sleep=time.sleep, now=lambda: datetime.now(timezone.utc),
               serial_factory=None, on_write=None, auto=False, allow_auto_write=False):
@@ -96,7 +98,9 @@ def sync_once(port, baud, address, meter_id, zone_name, *, reader=read_one,
             return set_clock_frame(address, target)
         write_frame(ser, build_at_boundary)
         ser.flush()
-        if ser.read(1) != b"\xe5":
+        ack = ser.read(1)
+        capture("RX", ack, classify(ack))
+        if ack != b"\xe5":
             raise ValueError("clock command not acknowledged")
     if not shared_timing_active():
         sleep(61)

@@ -4,6 +4,7 @@ All application serial writers pass through this gate. A conservative global
 bus interval also protects the same meter if its address changes. Standalone
 CLI usage outside the app must not share its serial device.
 """
+from raw_telegram_log import capture
 import logging
 import os
 import threading
@@ -70,7 +71,12 @@ class BusTiming:
             if target is not None and not 0 <= self.wall() - target <= 1:
                 raise MissedSlot('serial preparation exceeded planned slot')
             try:
-                return serial.write(frame)
+                written = serial.write(frame)
+                capture("TX", frame, "sent" if written == len(frame) else "partial_write")
+                return written
+            except Exception:
+                capture("TX", frame, "write_error")
+                raise
             finally:
                 self.eligible = self.monotonic() + MIN_INTERVAL
 

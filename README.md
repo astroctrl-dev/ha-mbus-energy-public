@@ -1,3 +1,7 @@
+# Public beta: v2.6.0-beta.1
+
+The ordinary App Store channel currently offers an opt-in raw diagnostics beta. Back up before updating. Stable v2.5.0 remains the latest stable release. [Beta notes](RELEASE-2.6.0-beta.1.md).
+
 # Latest stable release: v2.5.0
 
 Update through the ordinary Home Assistant App Store repository. Back up the existing app and its data before updating. The independent web interface uses English; Home Assistant configuration follows its own language. See [release notes](RELEASE-2.5.0.md).

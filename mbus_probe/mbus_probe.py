@@ -5,6 +5,7 @@ Requires pyserial. No address scanning or write/configuration commands.
 Only sends REQ_UD2 to a single explicitly supplied primary address.
 """
 from bus_timing import write_frame
+from raw_telegram_log import receive, operation
 import argparse
 import json
 from datetime import datetime, timezone
@@ -49,6 +50,8 @@ def validate(frame):
         info["records"] = decode_records(frame[19:-2])
     return info
 
+@operation("normal_read")
+@receive
 def read_one(port, baud, address, timeout, first_byte_timeout=None):
     import serial
     tx = request(address)

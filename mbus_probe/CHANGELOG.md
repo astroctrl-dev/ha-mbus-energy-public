@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.6.0-beta.1
+
+- Opt-in local raw transport evidence for investigation of historical dates. No additional bus commands. Capture defaults off on every restart; saved log remains downloadable. Two rotating 5 MiB files, bounded asynchronous queue. Raw JSONL is separate from existing anonymized Excel export. Physical validation pending; exact historical dates not yet implemented.
+
 ## 2.5.0
 
 - Final language architecture: Home Assistant configuration translations in four languages, independent web interface and Excel Info in English.

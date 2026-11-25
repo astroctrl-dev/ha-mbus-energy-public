@@ -3,6 +3,7 @@
 CI=50 application reset changes volatile interface frame selection. The CLI requires confirmation; app use is gated by a disabled-by-default option.
 """
 from bus_timing import write_frame, shared_timing_active
+from raw_telegram_log import receive, operation
 import argparse
 import json
 import logging
@@ -36,6 +37,7 @@ def restore_normal_frame(address):
     return bytes((0x68, 0x03, 0x03, 0x68)) + data + bytes((sum(data) & 255, 0x16))
 
 
+@receive
 def read_response(ser):
     first = ser.read(1)
     if first == b"\xe5" or not first:
@@ -86,6 +88,7 @@ def verify_normal_frame(frame, address, expected_id):
     return values
 
 
+@operation("monthly_history")
 def run(port, baud, address, meter_id, timeout=5):
     import serial
     if baud not in (300, 2400):

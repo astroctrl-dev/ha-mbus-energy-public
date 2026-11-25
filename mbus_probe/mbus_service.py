@@ -11,6 +11,7 @@ from pathlib import Path
 from contextlib import nullcontext
 
 from poll_schedule import next_aligned_poll_wait
+from raw_telegram_log import RawLog, install
 from bus_timing import BusTiming, install_bus_timing, MissedSlot, poll_slot
 from maintenance_schedule import MaintenanceSchedule
 
@@ -272,7 +273,9 @@ def main():
     client.connect(config["mqtt_host"], int(config.get("mqtt_port", 1883)),
                    keepalive=60)
     client.loop_start()
-    server = serve(registry, config, client, bus_lock, STOP)
+    raw_log = RawLog()
+    install(raw_log)
+    server = serve(registry, config, client, bus_lock, STOP, raw_log=raw_log)
     maintenance = MaintenanceSchedule(config, server.clock_controller, server.history_controller, STOP)
     def valid_round(meter_ids):
         maintenance.on_valid_round(meter_ids)

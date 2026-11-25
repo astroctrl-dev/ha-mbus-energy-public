@@ -19,7 +19,7 @@ PAGE = r"""<!doctype html><html lang="no"><meta charset="utf-8"><meta name="view
 <style>html,body{margin:0;min-height:100%;background:#f7f9fb;color:#17212b;font:16px/1.5 system-ui,-apple-system,sans-serif}main{max-width:720px;margin:0 auto;padding:20px 16px 40px}h1{font-size:1.5rem;line-height:1.2;margin:0 0 8px}h2{font-size:1.15rem;margin:24px 0 8px}p{margin:8px 0}button{min-height:44px;max-width:100%;border:1px solid #8a9aaa;border-radius:8px;background:#e8f1fa;color:#152b3e;padding:8px 14px;font:inherit;margin:4px 4px 4px 0}button:disabled{opacity:.55}button:focus-visible{outline:3px solid #1266ab}.table-wrap{overflow-x:auto;background:#fff;border:1px solid #d0d9e1;border-radius:8px}table{border-collapse:collapse;width:100%;font:inherit}th,td{text-align:left;padding:8px;border-bottom:1px solid #d0d9e1;white-space:nowrap}#status{background:#fff;border:1px solid #d0d9e1;border-radius:8px;padding:12px}.meter{background:#fff;border:1px solid #d0d9e1;border-radius:8px;padding:12px;margin:8px 0;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;overflow-wrap:anywhere}#error{color:#a12020;overflow-wrap:anywhere}</style><main><h1>M-Bus målere</h1><p>Søk leser primæradressene 0–250. Målere med delt adresse kan ikke alltid skilles.</p>
 <button id="scan">Søk etter målere</button><button id="auto">Velg eneste ledige automatisk</button>
 <h2>Klokke</h2><p>Synkronisering bruker systemtid og valgt tidssone i Configuration. Manuell synkronisering krever bekreftelse; automatisk kontroll starter etter første gyldige måling ved oppstart eller nytt målervalg.</p><p id="clock-status"></p><h2>Analyse</h2><p>Last ned validerte normalavlesninger og lagret månedshistorikk som Excel-fil. Nedlasting leser lagrede data og sender ingen kommando til måleren. Historikk hentes separat med knappen ved den valgte måleren.</p><button id="export">Last ned analyse (.xlsx)</button>
-<p id="status"></p><h2>Lagret månedshistorikk</h2><p>Posisjonene angir rekkefølge i målerens historikk. Datoer fra månedsrekkefølge vises som beregnet når målerklokka stemte med systemklokka ved innhenting; faktisk lagringstid er ikke lest fra måleren.</p><div id="history"></div><h2>Tilgjengelige målere</h2><div id="available"></div>
+<h2>Raw telegram diagnostics</h2><p>Local capture may contain meter identifiers and consumption. Capture resets to Off after restart. No extra bus requests.</p><p id="raw-status"></p><button id="raw-on">Enable raw capture</button><button id="raw-off">Disable raw capture</button><button id="raw-download">Download raw JSONL</button><p id="status"></p><h2>Lagret månedshistorikk</h2><p>Posisjonene angir rekkefølge i målerens historikk. Datoer fra månedsrekkefølge vises som beregnet når målerklokka stemte med systemklokka ved innhenting; faktisk lagringstid er ikke lest fra måleren.</p><div id="history"></div><h2>Tilgjengelige målere</h2><div id="available"></div>
 <h2>Etablerte målere</h2><div id="selected"></div><p id="error" role="alert"></p>
 </main><script>
 const root = location.pathname.replace(/\/$/, '');
@@ -75,6 +75,12 @@ async function refresh() {
   refreshing = true;
   try {
     const state = await call('/api/meters');
+    if (state.raw_log) {
+      const r=state.raw_log;
+      document.getElementById('raw-status').textContent = 'Capture: '+(r.enabled?'On':'Off')+'; queued: '+r.queued+'; dropped: '+r.dropped+'; rotations: '+r.rotations+'; storage error: '+r.storage_error;
+      document.getElementById('raw-on').disabled=r.enabled;
+      document.getElementById('raw-off').disabled=!r.enabled;
+    }
     document.getElementById('status').textContent =
       `Søk: ${localText(state.scan_status)}, adresser sjekket: ${state.scan_progress}/251, ` +
       `uavklarte svar: ${state.scan_errors.length}, opprydding venter: ${state.cleanup_pending}. ` +
@@ -145,6 +151,24 @@ document.getElementById('export').onclick = async () => {
     document.getElementById('error').textContent = '';
   } catch (e) { document.getElementById('error').textContent = e.message; }
 };
+async function rawToggle(enabled) {
+  if (enabled && !confirm('Raw data contains meter identifiers and consumption. Enable local capture?')) return;
+  try { await call('/api/raw-log', {enabled}); await refresh(); }
+  catch(e) { document.getElementById('error').textContent=e.message; }
+}
+document.getElementById('raw-on').onclick=()=>rawToggle(true);
+document.getElementById('raw-off').onclick=()=>rawToggle(false);
+document.getElementById('raw-download').onclick=async()=>{
+  if (!confirm('Raw export may contain meter identifiers and consumption. Review before sharing. Continue?')) return;
+  try {
+    const res=await fetch(root+'/api/raw.jsonl');
+    if (!res.ok) throw new Error('Raw export unavailable');
+    const url=URL.createObjectURL(await res.blob());
+    const link=document.createElement('a'); link.href=url; link.download='mbus-raw.jsonl';
+    document.body.append(link); link.click(); link.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),60000);
+  } catch(e) { document.getElementById('error').textContent=e.message; }
+};
 setInterval(refresh, 1500); refreshHistory(); refresh();
 </script></html>"""
 
@@ -185,7 +209,7 @@ def render_page(language):
     return html + "<script>" + prefix + script
 
 
-def serve(registry, config, client, bus_lock, stop, port=8099, history_controller=None, clock_controller=None):
+def serve(registry, config, client, bus_lock, stop, port=8099, history_controller=None, clock_controller=None, raw_log=None):
     history_controller = history_controller or HistoryController(
         registry, config, bus_lock, stop,
         on_complete=lambda meter_id, snapshot: publish_history(client, meter_id, snapshot))
@@ -207,6 +231,7 @@ def serve(registry, config, client, bus_lock, stop, port=8099, history_controlle
                 return
             if self.path.rstrip("/").endswith("/api/meters"):
                 self._send(200, {**registry.snapshot(), "history": history_controller.snapshot(),
+                                 "raw_log": raw_log.status() if raw_log else None,
                                  "history_enabled": config.get("allow_monthly_history", False),
                                  "clock": clock_controller.snapshot(),
                                  "clock_enabled": config.get("allow_clock_sync", False),
@@ -220,6 +245,21 @@ def serve(registry, config, client, bus_lock, stop, port=8099, history_controlle
                     self._send(409, {"error": "Lagret historikk kunne ikke leses"})
                     return
                 self._send(200, {"histories": entries})
+            elif self.path.endswith("/api/raw.jsonl"):
+                try:
+                    if raw_log is None:
+                        raise OSError("raw log unavailable")
+                    payload = raw_log.snapshot()
+                except OSError:
+                    self._send(409, {"error": "Raw export unavailable"})
+                    return
+                self.send_response(200)
+                self.send_header("Content-Type", "application/x-ndjson")
+                self.send_header("Content-Disposition", 'attachment; filename="mbus-raw.jsonl"')
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
             elif self.path.endswith("/api/export.xlsx"):
                 try:
                     payload = make_xlsx(load_samples("/data/analysis/normal.jsonl"),
@@ -246,7 +286,7 @@ def serve(registry, config, client, bus_lock, stop, port=8099, history_controlle
                 self._send(403, {"error": "ingress required"})
                 return
             route = self.path.rsplit("/", 2)[-1]
-            if route not in ("scan", "select", "auto", "remove", "history", "clock"):
+            if route not in ("scan", "select", "auto", "remove", "history", "clock", "raw-log"):
                 self._send(404, {"error": "not found"})
                 return
             try:
@@ -255,7 +295,11 @@ def serve(registry, config, client, bus_lock, stop, port=8099, history_controlle
                     raise ValueError("invalid request length")
                 data = json.loads(self.rfile.read(length) or b"{}")
                 meter_id = data.get("meter_id")
-                if route == "scan":
+                if route == "raw-log":
+                    if raw_log is None:
+                        raise ValueError("raw capture unavailable")
+                    raw_log.set_enabled(data.get("enabled"))
+                elif route == "scan":
                     with registry.lock:
                         if registry.scan_status == "running":
                             raise ValueError("scan already running")
