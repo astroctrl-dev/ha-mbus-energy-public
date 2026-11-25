@@ -1,6 +1,6 @@
-# Current app update: v2.7.4-beta.1 (pre-release)
+# Current app update: v2.7.4 (stable)
 
-The ordinary App Store channel offers this beta for controlled testing. Last stable version: v2.7.2. Back up before updating; keep automatic clock synchronization disabled during initial verification. The app uses the Home Assistant timezone when supplied by Supervisor (TZ), otherwise the configured clock timezone. Seasonal checks are eligible from the actual transition instant and run after a fresh valid polling round, subject to bus spacing. Physical seasonal transition verification is pending. Users who prefer stable should defer this update. See [changelog](mbus_probe/CHANGELOG.md).
+Stable release approved after physical clock synchronization and normal polling verification. Back up before updating. Seasonal checks run on the next eligible valid polling round after the actual transition instant. Actual seasonal transition, active alarm persistence and restart of this specific beta remain unverified. Clock readings retain minute resolution. See [changelog](mbus_probe/CHANGELOG.md).
 
 # M-Bus T230 energy metering for Home Assistant
 

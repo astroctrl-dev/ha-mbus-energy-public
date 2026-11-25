@@ -1,3 +1,9 @@
+# 2.7.4
+
+- Promotes 2.7.4-beta.1 without runtime code changes.
+- Private candidate CI: 171 tests and Docker build passed. Physical clock synchronization and ordinary polling verified; one transient timeout recovered automatically.
+- Previous beta sensor recovery after restart reported by product lead; restart of this specific candidate and actual seasonal transition remain unverified. Stable promotion approved by product lead.
+
 # 2.7.4-beta.1
 
 - Use the Home Assistant timezone supplied by Supervisor, with configured fallback.
