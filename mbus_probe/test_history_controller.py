@@ -287,7 +287,7 @@ class ArchiveControllerTests(unittest.TestCase):
         self.assertFalse(c.blocked.is_set())
         self.assertEqual(self.path.read_bytes(),self.original)
 
-    def test_every_start_selects_normal_even_without_marker(self):
+    def test_every_start_reads_normal_without_selector(self):
         from ha_measurements import REQUIRED_SENSORS
         from unittest.mock import Mock
         c=self.controller
@@ -301,18 +301,44 @@ class ArchiveControllerTests(unittest.TestCase):
              patch.object(c,"_restore_interface") as restore:
             reader=Mock(return_value=(b"tx",b"rx"))
             self.assertTrue(c.recover_normal(reader))
-            restore.assert_called_once_with("/dev/unused",2400,0)
+            restore.assert_not_called()
             reader.assert_called_once()
+            self.assertEqual(c.take_startup_readings()[0][:3],("00000000",0,normal))
+            self.assertEqual(c.take_startup_readings(),[])
         self.assertFalse(c.blocked.is_set())
         self.assertEqual(self.path.read_bytes(),self.original)
 
-    def test_startup_failure_preserves_guard(self):
+    def test_startup_unknown_frame_never_writes(self):
         c=self.controller
         c.require_startup_normal()
         with patch("history_controller.shared_timing_active",return_value=True), \
-             patch.object(c,"_restore_interface",side_effect=ValueError("no ACK")):
-            self.assertFalse(c.recover_normal(lambda *a,**k:self.fail("unexpected read")))
+             patch("history_controller.validate",side_effect=ValueError("bad checksum")), \
+             patch.object(c,"_restore_interface") as restore:
+            self.assertFalse(c.recover_normal(lambda *a,**k:(b"tx",b"rx")))
+            restore.assert_not_called()
         self.assertTrue(c.blocked.is_set())
         self.assertTrue(c.startup_pending)
-        self.assertTrue(c.marker.exists())
+        self.assertEqual(c.take_startup_readings(),[])
+        self.assertEqual(self.path.read_bytes(),self.original)
+
+    def test_startup_historical_restores_and_reuses_verified_frame(self):
+        from ha_measurements import REQUIRED_SENSORS
+        from unittest.mock import Mock
+        c=self.controller
+        c.require_startup_normal()
+        historical={"address":0,"control":8,"meter_id":"00000000","manufacturer":"LUG"}
+        normal={"address":0,"records":[{"kind":k,"current_record":True} for k in REQUIRED_SENSORS]}
+        with patch("history_controller.shared_timing_active",return_value=True), \
+             patch("history_controller.validate",side_effect=[historical,normal]), \
+             patch("history_controller.select_measurements",side_effect=[ValueError("historical"),{k:1 for k in REQUIRED_SENSORS}]), \
+             patch("history_controller.extract_months",side_effect=ValueError), \
+             patch("history_controller.extract_monthly_set_day",side_effect=ValueError), \
+             patch.object(c,"_confirmed_archive",return_value=True), \
+             patch.object(c,"_restore_interface") as restore:
+            reader=Mock(return_value=(b"tx",b"rx"))
+            self.assertTrue(c.recover_normal(reader))
+            restore.assert_called_once_with("/dev/unused",2400,0)
+            self.assertEqual(reader.call_count,2)
+            self.assertEqual(c.take_startup_readings()[0][:3],("00000000",0,normal))
+        self.assertFalse(c.blocked.is_set())
         self.assertEqual(self.path.read_bytes(),self.original)

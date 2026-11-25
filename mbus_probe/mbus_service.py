@@ -107,11 +107,14 @@ def load_config(path="/data/options.json"):
 
 
 def poll_once(config, client):
-    global _STATUS_10_LOGGED, _ANALYSIS_SAVE_ERROR_LOGGED
     tx, rx = read_one(config.get("serial_port", "/dev/ttyUSB0"),
                       int(config.get("baud", 2400)),
                       int(config.get("address", 0)), timeout=4)
-    decoded = validate(rx)
+    return publish_normal(config,client,validate(rx))
+
+
+def publish_normal(config,client,decoded,read_at_utc=None):
+    global _STATUS_10_LOGGED, _ANALYSIS_SAVE_ERROR_LOGGED
     if decoded.get("address") != int(config.get("address", 0)):
         raise ValueError("response primary address mismatch")
     # Frame identity is mandatory; individual measurement errors stay isolated.
@@ -125,7 +128,7 @@ def poll_once(config, client):
             "Intentionally logging only its first occurrence per app start "
             "to avoid flooding the log.", int(config.get("address", 0))
         )
-    read_at_utc = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    read_at_utc = read_at_utc or datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
     clock_attributes = assess_clock(decoded, read_at_utc, config.get("clock_timezone", "Europe/Oslo"))
     publish_reading(client, decoded, config["meter_id"], read_at_utc=read_at_utc,
                     clock_attributes=clock_attributes)
@@ -187,6 +190,25 @@ def run(config, client, registry=None, bus_lock=None, history_controller=None,
             client.publish(BRIDGE_AVAILABILITY, "offline", qos=1, retain=True)
             if history_controller.recover_normal():
                 client.publish(BRIDGE_AVAILABILITY, "online", qos=1, retain=True)
+                for meter_id,address,decoded,read_at in getattr(history_controller,"take_startup_readings",lambda:[])():
+                    try:
+                        with bus_lock if bus_lock else nullcontext():
+                            if STOP.is_set() or history_controller.blocked.is_set():
+                                continue
+                            if registry:
+                                with registry.lock:
+                                    if registry.selected.get(meter_id) != address:
+                                        continue
+                            if history_controller.migration_status(meter_id) in ("pending","invalid"):
+                                continue
+                            values = publish_normal(dict(config,meter_id=meter_id,address=address),
+                                                    client,decoded,read_at)
+                        attempted_meters.add(meter_id)
+                        last_served = meter_id
+                        LOG.info("Startup: published verified normal frame (%d measurements)",len(values))
+                    except (OSError,ValueError,ConnectionError,RuntimeError):
+                        LOG.warning("Startup publication failed; retry by ordinary polling")
+                        mark_unavailable(client,meter_id)
             else:
                 STOP.wait(120)
             if timing:

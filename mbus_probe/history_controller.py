@@ -63,6 +63,7 @@ class HistoryController:
         self.archive_meter = None
         self.archive_revision = 0
         self.startup_pending = False
+        self.startup_readings = []
 
     def snapshot(self):
         with self.lock:
@@ -112,7 +113,7 @@ class HistoryController:
                 and t230_footer(decoded,4) is not None)
 
     def require_startup_normal(self):
-        """Every process start must select and verify frame 1 on known meters."""
+        """Every process start must verify frame 1 on known meters."""
         if self.registry.snapshot()["selected"]:
             self.startup_pending = True
             self.blocked.set()
@@ -121,18 +122,9 @@ class HistoryController:
                               "captured_at_utc":None}
 
     def _initialize_normal(self, selected, reader):
-        # Caller holds the bus and registry locks. Always select normal frame,
-        # even after a clean stop; never reset the meter or its registers.
-        self.root.mkdir(parents=True,exist_ok=True)
-        with self.marker.open("w") as guard:
-            json.dump({"operation":"startup_normal"},guard)
-            guard.flush()
-            os.fsync(guard.fileno())
-        fd = os.open(self.root,os.O_RDONLY)
-        try:
-            os.fsync(fd)
-        finally:
-            os.close(fd)
+        # Verify first; only a positively identified historical frame permits
+        # a selector write. Keep the startup guard until all meters verify.
+        readings = []
         for meter_id,address in selected:
             if self.stop.is_set():
                 raise ValueError("startup interrupted")
@@ -140,14 +132,56 @@ class HistoryController:
             baud = int(self.config.get("baud",2400))
             if not shared_timing_active() and self.stop.wait(61):
                 raise ValueError("startup interrupted")
-            LOG.info("Startup: selecting normal telegram at primary address %d",address)
-            self._restore_interface(port,baud,address)
-            if not shared_timing_active() and self.stop.wait(61):
-                raise ValueError("startup interrupted")
             tx,frame = reader(port,baud,address,timeout=5)
+            read_at = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00","Z")
             self._recovery_log(tx,frame)
-            self._verify_recovery(validate(frame),address,meter_id)
+            decoded = validate(frame)
+            try:
+                self._verify_recovery(decoded,address,meter_id)
+            except ValueError as normal_error:
+                if (decoded.get("address") != address or decoded.get("control") not in (8,24)
+                        or decoded.get("meter_id") != meter_id or decoded.get("manufacturer") != "LUG"):
+                    raise normal_error
+                try:
+                    extract_months(frame,meter_id)
+                except ValueError:
+                    try:
+                        extract_monthly_set_day(frame,address,meter_id)
+                    except ValueError:
+                        if not self._confirmed_archive(decoded,address,meter_id):
+                            raise normal_error from None
+                if len(selected) != 1:
+                    raise ValueError("interface restore requires exactly one selected meter")
+                if self.stop.is_set():
+                    raise ValueError("startup interrupted")
+                self.root.mkdir(parents=True,exist_ok=True)
+                with self.marker.open("w") as guard:
+                    json.dump({"operation":"startup_normal"},guard)
+                    guard.flush()
+                    os.fsync(guard.fileno())
+                fd = os.open(self.root,os.O_RDONLY)
+                try:
+                    os.fsync(fd)
+                finally:
+                    os.close(fd)
+                if not shared_timing_active() and self.stop.wait(61):
+                    raise ValueError("startup interrupted")
+                LOG.info("Startup: confirmed historical frame; selecting normal telegram")
+                self._restore_interface(port,baud,address)
+                if not shared_timing_active() and self.stop.wait(61):
+                    raise ValueError("startup interrupted")
+                tx,frame = reader(port,baud,address,timeout=5)
+                read_at = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00","Z")
+                self._recovery_log(tx,frame)
+                decoded = validate(frame)
+                self._verify_recovery(decoded,address,meter_id)
+            readings.append((meter_id,address,decoded,read_at))
             LOG.info("Startup: normal telegram verified at primary address %d",address)
+        self.startup_readings = readings
+
+    def take_startup_readings(self):
+        readings, self.startup_readings = self.startup_readings, []
+        return readings
 
     def recover_normal(self, reader=read_one):
         """Read first; restore a confirmed interrupted app-owned archive or explicitly permitted historical frame."""
