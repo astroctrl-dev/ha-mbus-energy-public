@@ -67,13 +67,13 @@ class ServiceTests(unittest.TestCase):
              patch("mbus_service.validate", return_value=self.decoded):
             values = poll_once({"meter_id": "00000000", "address": 0}, client)
         self.assertEqual(values["energy"], 12345)
-        # 15 Discovery configs + 10 measurements + 5 diagnostics + availability
-        self.assertEqual(len(client.messages), 32)
+        # 17 discovery configs, 15 regular states, clock attributes, availability, 4 DST messages
+        self.assertEqual(len(client.messages), 38)
         states = {topic.rsplit("/", 2)[-2]: payload for topic, payload, _, _
                   in client.messages if topic.endswith("/state")}
         self.assertRegex(states["last_successful_read_utc"],
                          r"^20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")
-        self.assertEqual(client.messages[-1][1], "online")
+        self.assertIn(("mbus/t230/" + __import__("mqtt_bridge").device_key("00000000") + "/availability", "online", 1, True), client.messages)
 
     def test_status_0x10_warns_only_once_per_process(self):
         client = FakeClient()

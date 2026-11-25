@@ -15,11 +15,12 @@ from raw_telegram_log import RawLog, install
 from bus_timing import BusTiming, install_bus_timing, MissedSlot, poll_slot, slot_tolerance, slot_open
 from maintenance_schedule import MaintenanceSchedule
 from clock_model import assess_clock
+from dst_transition import TransitionStore
 
 from ha_measurements import SENSORS, select_measurements
 from mbus_probe import read_one, validate
 from mqtt_bridge import (BRIDGE_AVAILABILITY, cleanup_discovery,
-                         mark_unavailable, publish_reading)
+                         mark_unavailable, publish_reading, publish_dst_diagnostics)
 from meter_registry import MeterRegistry
 from meter_ui import serve
 from history_controller import load_history
@@ -128,7 +129,15 @@ def poll_once(config, client):
                     clock_attributes=clock_attributes)
     observer = config.get("_clock_observer")
     if observer:
-        observer(config["meter_id"], clock_attributes)
+        observer(config["meter_id"], dict(clock_attributes, observed_at_utc=read_at_utc))
+    try:
+        state = TransitionStore("/data/analysis", config["meter_id"]).load()
+    except (OSError, ValueError, TypeError):
+        state = {"state_status": "unavailable"}
+    try:
+        publish_dst_diagnostics(client, config["meter_id"], state)
+    except (OSError, ConnectionError, RuntimeError):
+        LOG.warning("DST diagnostic publication failed; ordinary readings preserved")
     if not config.get('log_measurement_data', True):
         return selected
     try:

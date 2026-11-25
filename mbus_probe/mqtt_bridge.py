@@ -68,7 +68,37 @@ def discovery_messages(meter_id):
         if kind == "last_successful_read_utc":
             payload["device_class"] = "timestamp"
         messages.append((topic, json.dumps(payload), True))
+    for kind, label in (("dst_transition_failed", "DST Transition Failed"),
+                        ("dst_clock_override", "DST Clock Override")):
+        payload = {"name": label, "unique_id": f"mbus_t230_{key}_{kind}",
+                   "device": device, "state_topic": f"mbus/t230/{key}/{kind}/state",
+                   "json_attributes_topic": f"mbus/t230/{key}/{kind}/attributes",
+                   "payload_on": "ON", "payload_off": "OFF",
+                   "availability": [{"topic": availability}, {"topic": BRIDGE_AVAILABILITY}],
+                   "availability_mode": "all", "entity_category": "diagnostic"}
+        if kind == "dst_transition_failed":
+            payload["device_class"] = "problem"
+        messages.append((f"homeassistant/binary_sensor/mbus_t230_{key}_{kind}/config",
+                         json.dumps(payload), True))
     return messages
+
+
+def publish_dst_diagnostics(client, meter_id, state):
+    """Publish persisted evidence; unknown must never be represented as OFF."""
+    key = device_key(meter_id)
+    incidents = state.get("incidents") or []
+    attributes = {"last_transition": state.get("last_transition"),
+                  "last_incident": incidents[-1] if incidents else None,
+                  "state_status": state.get("state_status", "stored")}
+    for kind in ("dst_transition_failed", "dst_clock_override"):
+        value = state.get(kind)
+        payload = "ON" if value is True else "OFF" if value is False else "None"
+        for suffix, data in (("attributes", json.dumps(attributes)), ("state", payload)):
+            result = client.publish(f"mbus/t230/{key}/{kind}/{suffix}", data,
+                                    qos=1, retain=False)
+            if result.rc:
+                raise ConnectionError("MQTT DST diagnostic publish failed")
+            result.wait_for_publish(timeout=5)
 
 
 def history_discovery_messages(meter_id):

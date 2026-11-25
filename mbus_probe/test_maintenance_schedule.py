@@ -125,3 +125,55 @@ class ScheduleTests(unittest.TestCase):
         self.schedule.observe_clock("12345678", {"clock_out_of_sync": True, "clock_offset_seconds": 301})
         self.schedule.on_valid_round(["12345678"])
         self.assertEqual(self.clock.calls, [])
+
+
+    def test_transition_once_at_noon_and_persistent_failure(self):
+        from dst_transition import TransitionStore
+        self.schedule.config["auto_monthly_history"] = False
+        self.schedule.config["auto_clock_sync"] = False
+        self.local = self.local.replace(month=3, day=28, hour=12)
+        meter = "12345678"
+        self.schedule.observe_clock(meter, {"clock_offset_seconds": 0, "clock_dst_mismatch": False})
+        self.schedule.on_valid_round([meter])
+        store = TransitionStore(self.tmp.name, meter)
+        self.assertIsNone(store.load()["dst_transition_failed"])
+        self.local = self.local.replace(day=29, hour=11)
+        self.schedule.observe_clock(meter, {"clock_offset_seconds": -3600, "clock_dst_mismatch": True})
+        self.schedule.on_valid_round([meter])
+        self.assertIsNone(store.load()["dst_transition_failed"])
+        self.local = self.local.replace(hour=12)
+        self.schedule.observe_clock(meter, {"clock_offset_seconds": -3600, "clock_dst_mismatch": True})
+        self.schedule.on_valid_round([meter])
+        self.assertTrue(store.load()["dst_transition_failed"])
+        self.local = self.local.replace(day=30)
+        self.schedule.observe_clock(meter, {"clock_offset_seconds": 0, "clock_dst_mismatch": False})
+        self.schedule.on_valid_round([meter])
+        self.assertTrue(store.load()["dst_transition_failed"])
+        self.assertEqual(self.clock.calls, [])
+        self.local = self.local.replace(month=10, day=25)
+        self.schedule.observe_clock(meter, {"clock_offset_seconds": 0, "clock_dst_mismatch": False})
+        self.schedule.on_valid_round([meter])
+        self.assertFalse(store.load()["dst_transition_failed"])
+        self.assertFalse(store.load()["dst_clock_override"])
+
+
+    def test_catch_up_after_restart_and_intervention_does_not_clear_latch(self):
+        from dst_transition import TransitionStore
+        meter = "12345678"
+        self.schedule.config["auto_monthly_history"] = False
+        self.schedule.config["auto_clock_sync"] = False
+        self.local = self.local.replace(month=3, day=28, hour=12)
+        self.schedule.on_valid_round([meter])
+        self.local = self.local.replace(day=30)
+        self.schedule = MaintenanceSchedule(self.schedule.config, self.clock, self.history,
+            threading.Event(), now=lambda: self.local, root=self.tmp.name)
+        self.schedule.observe_clock(meter, {"clock_offset_seconds": -3600, "clock_dst_mismatch": True})
+        self.schedule.on_valid_round([meter])
+        store = TransitionStore(self.tmp.name, meter)
+        self.assertTrue(store.load()["dst_transition_failed"])
+        self.local = self.local.replace(month=10, day=25)
+        self.clock.last_write_at = lambda _: self.local.replace(hour=9)
+        self.schedule.observe_clock(meter, {"clock_offset_seconds": 0, "clock_dst_mismatch": False})
+        self.schedule.on_valid_round([meter])
+        self.assertTrue(store.load()["dst_transition_failed"])
+        self.assertEqual(store.load()["incidents"][-1]["result"], "intervention_unverified")

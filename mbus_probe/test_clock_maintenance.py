@@ -225,7 +225,7 @@ class DSTTransitionTests(unittest.TestCase):
         ser = FakeSerial()
         result = sync_once("/dev/ttyUSB0", 2400, 7, "12345678", "Europe/Oslo",
                            serial_factory=lambda *a, **k: ser, sleep=lambda _: None,
-                           now=lambda: instant, auto=True, allow_auto_write=True)
+                           now=lambda: instant, auto=True, allow_auto_write=True, seasonal_shift=3600)
         self.assertTrue(result["changed"])
         self.assertTrue(result["dst_readback"])
         self.assertTrue(ser.sent[0][10] & 0x80)
@@ -248,4 +248,91 @@ class DSTWriteTests(unittest.TestCase):
                            now=lambda: local, test_dst=True)
         self.assertEqual(result["dst_test_results"], {"1": True, "0": True})
         self.assertTrue(result["clock_restored"])
-        self.assertEqual([f[10] & 0x80 for f in ser.sent], [0x80, 0, 0])
+        self.assertEqual([f[11] & 0x80 for f in ser.sent[:2]], [0x80, 0])
+        self.assertEqual(ser.sent[2][10] & 0x80, 0)
+        self.assertEqual(ser.sent[0][7:10], bytes((4, 0xED, 0)))
+        self.assertEqual(ser.sent[0][1:3], bytes((10, 10)))
+        self.assertEqual(ser.sent[0][-2], sum(ser.sent[0][4:-2]) & 255)
+
+    @patch("clock_maintenance._read_clock")
+    def test_alternative_failure_skips_zero_and_restores(self, read_clock):
+        local = datetime(2026, 11, 25, 12, 0, tzinfo=ZoneInfo("Europe/Oslo"))
+        read_clock.return_value = {"meter_local_time": "2026-11-25T12:00", "meter_summer_time": False}
+        ser = FakeSerial()
+        result = sync_once("/dev/ttyUSB0", 2400, 7, "12345678", "Europe/Oslo",
+                           serial_factory=lambda *a, **k: ser, sleep=lambda _: None,
+                           now=lambda: local, test_dst=True)
+        self.assertEqual(result["dst_test_results"], {"1": False})
+        self.assertIn("DST bit", result["dst_test_errors"]["1"])
+        self.assertTrue(result["clock_restored"])
+        self.assertEqual(len(ser.sent), 2)
+        self.assertEqual(ser.sent[1][7:9], bytes((4, 0x6D)))
+
+
+class DSTBitOnlyTests(unittest.TestCase):
+    @patch("clock_maintenance._read_clock")
+    def test_correct_wall_clock_never_written_for_bit_only(self, read_clock):
+        for month, bit in ((6, False), (11, True)):
+            instant = datetime(2026, month, 25, 12, tzinfo=ZoneInfo("Europe/Oslo"))
+            read_clock.return_value = {
+                "meter_local_time": instant.replace(tzinfo=None).isoformat(),
+                "meter_summer_time": bit}
+            result = sync_once("/dev/ttyUSB0", 2400, 7, "12345678", "Europe/Oslo",
+                               auto=True, allow_auto_write=True, now=lambda: instant,
+                               sleep=lambda _: self.fail("unexpected wait"),
+                               serial_factory=lambda *a, **k: self.fail("unexpected write"))
+            self.assertFalse(result["changed"])
+            self.assertEqual(result["dst_readback"], bit)
+            self.assertNotEqual(result["dst_expected"], bit)
+
+
+class SeasonalSafetyTests(unittest.TestCase):
+    @patch("clock_maintenance._read_clock")
+    def test_ordinary_auto_cannot_bypass_large_drift(self, read_clock):
+        instant = datetime(2026, 3, 29, 12, tzinfo=ZoneInfo("Europe/Oslo"))
+        read_clock.return_value = {"meter_local_time": "2026-03-29T11:00", "meter_summer_time": False}
+        result = sync_once("/dev/ttyUSB0", 2400, 7, "12345678", "Europe/Oslo",
+                           now=lambda: instant, auto=True, allow_auto_write=True,
+                           sleep=lambda _: self.fail("unexpected wait"),
+                           serial_factory=lambda *a, **k: self.fail("unexpected write"))
+        self.assertTrue(result["manual_required"])
+        self.assertFalse(result["changed"])
+
+    @patch("clock_maintenance._read_clock")
+    def test_seasonal_correction_requires_trust_and_direction(self, read_clock):
+        instant = datetime(2026, 10, 25, 12, tzinfo=ZoneInfo("Europe/Oslo"))
+        for trusted, shift in ((False, -3600), (True, 3600)):
+            read_clock.return_value = {"meter_local_time": "2026-10-25T13:00", "meter_summer_time": True}
+            result = sync_once("/dev/ttyUSB0", 2400, 7, "12345678", "Europe/Oslo",
+                               now=lambda: instant, auto=True, allow_auto_write=trusted,
+                               seasonal_shift=shift, sleep=lambda _: self.fail("unexpected wait"),
+                               serial_factory=lambda *a, **k: self.fail("unexpected write"))
+            self.assertTrue(result["manual_required"])
+
+    def test_override_persisted_before_worker_completes(self):
+        from dst_transition import TransitionStore, latest_transition
+        class Registry:
+            lock = threading.Lock()
+            selected = {"12345678": 7}
+        now = datetime(2026, 3, 29, 12, tzinfo=ZoneInfo("Europe/Oslo"))
+        transition = latest_transition(now, "Europe/Oslo")
+        cfg = {"allow_clock_sync": True, "auto_clock_sync": True,
+               "serial_port": "/dev/ttyUSB0"}
+        with tempfile.TemporaryDirectory() as root:
+            store = TransitionStore(root, "12345678")
+            store.observe(transition, -3600, True, now)
+            def verified(*args, on_write, **kwargs):
+                on_write("2026-03-29T11:00", "2026-03-29T12:00")
+                return {"changed": True, "manual_required": False,
+                        "before": "2026-03-29T11:00", "target": "2026-03-29T12:00",
+                        "after": "2026-03-29T12:00", "before_offset_seconds": -3600,
+                        "after_offset_seconds": 0}
+            controller = ClockController(Registry(), cfg, threading.Lock(), threading.Event(),
+                                         operation=verified, pause=lambda _: None, root=root)
+            controller._save("12345678", "verified")
+            worker = controller.start("12345678", auto=True, seasonal_shift=3600, transition=transition)
+            worker.join(2)
+            self.assertFalse(worker.is_alive())
+            state = TransitionStore(root, "12345678").load()
+            self.assertTrue(state["dst_transition_failed"])
+            self.assertTrue(state["dst_clock_override"])

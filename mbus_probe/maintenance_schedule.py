@@ -14,7 +14,7 @@ import time
 from datetime import datetime, timezone, timedelta
 from history_controller import history_file
 from zoneinfo import ZoneInfo
-from clock_model import seasonal_key
+from dst_transition import latest_transition, evaluate_transition, TransitionStore
 
 LOG = logging.getLogger("mbus.maintenance")
 
@@ -67,6 +67,7 @@ class MaintenanceSchedule:
     def observe_clock(self, meter_id, attributes):
         with self.lock:
             self.clock_observations[meter_id] = dict(attributes)
+            self.clock_observations[meter_id].setdefault("observed_at_utc", self.now().isoformat())
 
     def configuration_due(self, meter_id, local):
         try:
@@ -118,12 +119,6 @@ class MaintenanceSchedule:
             key = ("clock", meter_id, "startup")
             if not self._done(key):
                 yield key
-            # Check the seasonal policy after a restart or transition, even after downtime.
-            period = "dst-" + seasonal_key(local, self.config.get("clock_timezone", "Europe/Oslo"),
-                                            self.config.get("use_daylight_saving_time", True))
-            key = ("clock", meter_id, period)
-            if not self._done(key) and self.clock_observations.get(meter_id, {}).get("clock_dst_mismatch") is True:
-                yield key
             key = ("clock", meter_id, date)
             if local.day == 15 and local.hour == 23 and not self._done(key):
                 yield key
@@ -137,13 +132,74 @@ class MaintenanceSchedule:
             if self.history_due(meter_id, local) and not self._done(key):
                 yield key
 
+    def _transition_job(self, meter_id, local):
+        """Consume at most one observed seasonal transition, before any write."""
+        if hasattr(self.history, "migration_status") and self.history.migration_status(meter_id) in ("pending", "invalid"):
+            return None
+        enabled = self.config.get("use_daylight_saving_time", True)
+        zone = self.config.get("clock_timezone", "Europe/Oslo")
+        transition = latest_transition(local, zone) if enabled else None
+        store = TransitionStore(self.root, meter_id)
+        try:
+            state = store.establish_baseline(transition, f"{zone}:{enabled}")
+            if not transition or state["last_transition"] == transition["key"]:
+                return None
+            observation = self.clock_observations.get(meter_id, {})
+            observed = datetime.fromisoformat(observation["observed_at_utc"])
+            noon = datetime.fromisoformat(transition["key"].rsplit(":", 1)[1]).replace(hour=12, tzinfo=self.zone)
+            if observed.tzinfo is None or not noon.timestamp() <= observed.timestamp() <= local.timestamp():
+                return None
+            if local.timestamp() - observed.timestamp() > 900:
+                return None
+            offset = observation.get("clock_offset_seconds")
+            mismatch = observation.get("clock_dst_mismatch")
+            outcome = evaluate_transition(transition, offset, mismatch)
+            if outcome == "unknown":
+                return None
+            if outcome == "independent_success" and hasattr(self.clock, "last_write_at"):
+                last_write = self.clock.last_write_at(meter_id)
+                # Even a manual test or an uncertain write invalidates independent success.
+                if last_write is not None and last_write.timestamp() >= (noon - timedelta(hours=12)).timestamp():
+                    store.record_intervened(transition, local)
+                    return None
+            store.observe(transition, offset, mismatch, local)
+            if (outcome == "seasonal_correction_required" and
+                    self.config.get("allow_clock_sync") and self.config.get("auto_clock_sync")):
+                return transition
+        except (OSError, ValueError, TypeError, KeyError):
+            LOG.warning("DST transition state unavailable; seasonal correction suppressed")
+        return None
+
+    def _execute_transition(self, meter_id, transition):
+        try:
+            if self.stop.is_set():
+                return
+            worker = self.clock.start(meter_id, auto=True,
+                                      seasonal_shift=transition["shift_seconds"],
+                                      transition=transition)
+            if worker is not None:
+                worker.join()
+            # The clock worker persists the verified override before completing.
+        except (ValueError, RuntimeError, OSError, TypeError, KeyError):
+            LOG.warning("Seasonal clock correction not verified; alarm retained")
+
     def on_valid_round(self, meter_ids):
         if self.stop.is_set():
             return
         with self.lock:
             if self.worker and self.worker.is_alive():
                 return
+            if self.clock.snapshot().get("status") == "running":
+                return
             local = self.now().astimezone(self.zone)
+            # A transition observation is persisted before attempting correction.
+            for meter_id in meter_ids:
+                transition = self._transition_job(meter_id, local)
+                if transition:
+                    self.worker = threading.Thread(target=self._execute_transition,
+                                                   args=(meter_id, transition), daemon=True)
+                    self.worker.start()
+                    return
             jobs = [key for meter_id in meter_ids for key in self.due(meter_id, local)
                     if self.monotonic() - self.attempted.get(key, -1e12) >= 600]
             filtered = []
@@ -157,9 +213,7 @@ class MaintenanceSchedule:
                     if observation.get("clock_out_of_sync") is not True:
                         continue
                     offset = observation.get("clock_offset_seconds")
-                    if offset is None or (abs(offset) > 300 and not (
-                            key[2].startswith("dst-") and observation.get("clock_dst_mismatch") is True
-                            and abs(abs(offset) - 3600) <= 300)):
+                    if offset is None or abs(offset) > 300 or abs(offset) <= 120:
                         self._record(key)
                         LOG.warning("Meter clock requires manual verification")
                         continue

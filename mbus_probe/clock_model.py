@@ -47,7 +47,7 @@ def assess_clock(decoded, read_at, zone_name, use_dst=True):
         offset = int((meter - local.replace(tzinfo=None)).total_seconds())
         dst_mismatch = obs["meter_summer_time"] != bool(local.dst())
         return {"clock_offset_seconds": offset,
-                "clock_out_of_sync": abs(offset) > 120 or dst_mismatch,
+                "clock_out_of_sync": abs(offset) > 120,
                 "clock_dst_mismatch": dst_mismatch}
     except (ValueError, TypeError, KeyError):
         return {"clock_offset_seconds": None, "clock_out_of_sync": None,

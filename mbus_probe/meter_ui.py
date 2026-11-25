@@ -11,6 +11,7 @@ from analysis_export import load_samples, make_xlsx
 from history_controller import HistoryController, load_history
 from clock_maintenance import ClockController
 from clock_model import configured_local
+from dst_transition import TransitionStore
 from mqtt_bridge import publish_history
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -87,14 +88,14 @@ async function refresh() {
     document.getElementById('clock-status').textContent =
       `Klokke: ${localText(state.clock.status)}. Systemtid nå: ${state.clock_target}. ` +
       (state.clock.result ? `Før: ${state.clock.result.before || '—'}, mål: ${state.clock.result.target || 'ingen endring'}, etter: ${state.clock.result.after || '—'}. ` : '') +
-      (state.clock.result && state.clock.result.dst_test ? `DST 1: ${state.clock.result.dst_test_results?.["1"] === true ? "PASS" : "FAIL"}; DST 0: ${state.clock.result.dst_test_results?.["0"] === true ? "PASS" : "FAIL"}; restored: ${state.clock.result.clock_restored ? "PASS" : "FAIL"}. ` : '') + (localText(state.clock.error) || '');
+      (state.clock.result && state.clock.result.dst_test ? `DST 1: ${state.clock.result.dst_test_results?.["1"] === true ? "PASS" : state.clock.result.dst_test_results?.["1"] === false ? "FAIL" : "NOT TESTED"}; DST 0: ${state.clock.result.dst_test_results?.["0"] === true ? "PASS" : state.clock.result.dst_test_results?.["0"] === false ? "FAIL" : "NOT TESTED"}; restored: ${state.clock.result.clock_restored ? "PASS" : "FAIL"}. ` : '') + (localText(state.clock.error) || '');
     if (state.history.status === 'complete' && state.history.captured_at_utc !== lastHistoryCapture) {
       lastHistoryCapture = state.history.captured_at_utc;
       await refreshHistory();
     }
     document.getElementById('scan').disabled = state.scan_status === 'running';
     document.getElementById('auto').disabled = state.scan_status !== 'completed' || state.scan_errors.length > 0 || state.available.filter(m => m.supported).length !== 1;
-    const lists = JSON.stringify([state.available, state.selected, state.history_enabled, state.history.status, state.clock_enabled, state.auto_clock_sync, state.clock.status, state.clock_target, state.migrations]);
+    const lists = JSON.stringify([state.available, state.selected, state.history_enabled, state.history.status, state.clock_enabled, state.auto_clock_sync, state.clock.status, state.clock_target, state.migrations, state.dst_diagnostics]);
     if (lists !== lastLists) {
       lastLists = lists;
     for (const name of ['available', 'selected']) {
@@ -104,6 +105,12 @@ async function refresh() {
         line.textContent = `ID ${item.meter_id}, adresse ${item.address}` +
           (item.manufacturer ? `, ${item.manufacturer}` : '');
         if (name === 'selected') {
+          const dstState = (state.dst_diagnostics || {})[item.meter_id] || {};
+          const diagnostic = document.createElement('p');
+          const flag = value => localText(value === true ? 'DST_ACTIVE' : value === false ? 'DST_INACTIVE' : 'DST_UNKNOWN');
+          diagnostic.textContent = localText('DST_TRANSITION_FAILED') + ': ' + flag(dstState.dst_transition_failed) +
+            '; ' + localText('DST_CLOCK_OVERRIDE') + ': ' + flag(dstState.dst_clock_override);
+          line.append(diagnostic);
           line.append(button('Fjern', () => act('/api/remove', item.meter_id)));
           const hist = button('Hent månedshistorikk', async () => {
             if (!confirm('Dette bytter midlertidig M-Bus-ramme (CI=50h/03h), leser historikk og gjenoppretter normalrammen. Avlesningen tar noen minutter. Fortsette?')) return;
@@ -127,7 +134,7 @@ async function refresh() {
           });
           clock.disabled = !state.clock_enabled || state.clock.status === 'running' || state.history.status === 'running';
           line.append(clock);
-           const dst = button('Test DST write', async () => {
+           const dst = button('Test DST write (04 ED 00)', async () => {
              if (!confirm('Test both DST bits, then restore configured time? This temporarily writes an incorrect DST bit.')) return;
              try { await call('/api/clock', {meter_id:item.meter_id, confirm:true, test_dst:true}); await refresh(); }
              catch(e) { document.getElementById('error').textContent=e.message; }
@@ -223,6 +230,18 @@ def serve(registry, config, client, bus_lock, stop, port=8099, history_controlle
         on_complete=lambda meter_id, snapshot: publish_history(client, meter_id, snapshot))
     clock_controller = clock_controller or ClockController(registry, config, bus_lock, stop,
                                                            history_blocked=history_controller.blocked)
+    def dst_diagnostics():
+        result = {}
+        for row in registry.snapshot()["selected"]:
+            meter_id = row["meter_id"]
+            try:
+                state = TransitionStore("/data/analysis", meter_id).load()
+                result[meter_id] = {k: state.get(k) for k in
+                                    ("dst_transition_failed", "dst_clock_override", "last_transition")}
+            except (OSError, ValueError, TypeError):
+                result[meter_id] = {"dst_transition_failed": None, "dst_clock_override": None}
+        return result
+
     class Handler(BaseHTTPRequestHandler):
         def _send(self, status, payload, content_type="application/json"):
             body = (payload if isinstance(payload, str) else json.dumps(payload)).encode()
@@ -241,6 +260,7 @@ def serve(registry, config, client, bus_lock, stop, port=8099, history_controlle
                 self._send(200, {**registry.snapshot(), "history": history_controller.snapshot(),
                                  "migrations": {r["meter_id"]: history_controller.migration_status(r["meter_id"]) for r in registry.snapshot()["selected"]},
                                  "raw_log": raw_log.status() if raw_log else None,
+                                 "dst_diagnostics": dst_diagnostics(),
                                  "history_enabled": config.get("allow_monthly_history", False),
                                  "clock": clock_controller.snapshot(),
                                  "clock_enabled": config.get("allow_clock_sync", False),
