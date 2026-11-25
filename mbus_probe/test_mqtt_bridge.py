@@ -31,8 +31,8 @@ class MqttTests(unittest.TestCase):
     def test_stable_discovery_and_units(self):
         first = discovery_messages("00000000")
         self.assertEqual(first, discovery_messages("00000000"))
-        self.assertEqual(len(first), 17)
-        self.assertEqual(len({json.loads(p)["unique_id"] for _, p, _ in first}), 17)
+        self.assertEqual(len(first), 18)
+        self.assertEqual(len({json.loads(p)["unique_id"] for _, p, _ in first}), 18)
         by_kind = {json.loads(p)["name"]: json.loads(p) for _, p, _ in first}
         self.assertEqual(len(by_kind["Energy"]["availability"]), 2)
         self.assertEqual(by_kind["Energy"]["availability_mode"], "all")
@@ -66,7 +66,7 @@ class MqttTests(unittest.TestCase):
         client = FakeClient()
         values = publish_reading(client, self.decoded, "00000000")
         self.assertEqual(values["energy"], 12345)
-        self.assertEqual(len(client.messages), 34)
+        self.assertEqual(len(client.messages), 37)
         self.assertEqual(client.messages[-1],
                          (availability_topic(device_key("00000000")), "online", 1, True))
         self.assertFalse(any("wrong_installation" in t for t, _, _, _ in client.messages))
@@ -203,7 +203,7 @@ class MqttTests(unittest.TestCase):
     def test_explicit_cleanup_clears_retained_discovery(self):
         client = FakeClient()
         cleanup_discovery(client, "00000000")
-        self.assertEqual(len(client.messages), 68)
+        self.assertEqual(len(client.messages), 84)
         self.assertTrue(all(payload == "" and retain
                             for _, payload, _, retain in client.messages[1:]))
 
@@ -233,7 +233,7 @@ class PassiveDiagnosticsTests(unittest.TestCase):
         client = FakeClient()
         publish_reading(client, decoded, "00000000")
         attrs = [json.loads(p) for t,p,_,_ in client.messages
-                 if t.endswith("/meter_status/attributes")]
+                 if t.endswith("/flow/attributes")]
         self.assertEqual(attrs[0]["flow_measurement_interval_seconds"], 4)
         self.assertEqual(attrs[0]["flow_averaging_interval_seconds"], 8)
         config = [json.loads(p) for t,p,_ in discovery_messages("00000000")
@@ -275,8 +275,47 @@ class ErrorHistoryPublicationTests(unittest.TestCase):
                                  "last_occurrence_local":{"FT":"2026-11-22T19:03"}}
         client = FakeClient()
         publish_history(client, "12345678", snap)
-        attrs = next(json.loads(p) for t,p,_,_ in client.messages
-                     if t.endswith("/meter_error_history/attributes"))
-        self.assertEqual(attrs["last_occurrence_local"]["FT"], "2026-11-22T19:03")
-        self.assertIsNone(attrs["last_occurrence_local"]["FS"])
-        self.assertEqual(attrs["active_faults"], "not_inferred")
+        from mqtt_bridge import ERROR_EVENTS, obsolete_error_topics
+        key = device_key("12345678")
+        published = {t: p for t,p,_,_ in client.messages}
+        for code, kind, label in ERROR_EVENTS:
+            root = f"mbus/t230/{key}/{kind}"
+            cfg = json.loads(published[f"homeassistant/sensor/mbus_t230_{key}_{kind}/config"])
+            self.assertEqual(cfg["name"], label)
+            self.assertEqual(cfg["entity_category"], "diagnostic")
+            self.assertNotIn("device_class", cfg)
+            self.assertEqual(published[root+"/state"], "2026-11-22T19:03" if code == "FT" else "unknown")
+            attrs = json.loads(published[root+"/attributes"])
+            self.assertEqual(attrs["code"], code)
+            self.assertEqual(attrs["active_faults"], "not_inferred")
+        for topic in obsolete_error_topics(key):
+            self.assertEqual(published[topic], "")
+        self.assertEqual(len(ERROR_EVENTS), 5)
+
+class DiagnosticPlacementTests(unittest.TestCase):
+    def test_flow_status_and_firmware_are_separate(self):
+        from mbus_records import decode_records
+        decoded = validate(bytes.fromhex(Path(__file__).with_name(
+            "fixture_t230_sanitized.hex").read_text()))
+        decoded["records"] = [r for r in decoded["records"]
+                              if r.get("vif") not in (0x70, 0x74)
+                              and r.get("kind") != "manufacturer_specific"]
+        decoded["records"] += decode_records(bytes.fromhex(
+            "09 74 04 09 70 08 0f 12 07 00 62 01"))
+        client = FakeClient()
+        publish_reading(client, decoded, "00000000", read_at_utc="2026-11-25T18:00:00Z")
+        payloads = {t:p for t,p,_,_ in client.messages}
+        root = f"mbus/t230/{device_key('00000000')}"
+        self.assertEqual(json.loads(payloads[root+"/flow/attributes"]), {
+            "flow_measurement_interval_seconds":4, "flow_averaging_interval_seconds":8})
+        self.assertEqual(json.loads(payloads[root+"/meter_status/attributes"]), {
+            "extension_byte":"0x62", "read_at_utc":"2026-11-25T18:00:00Z"})
+        self.assertEqual(payloads[root+"/firmware_version/state"], "7.12")
+        configs = {json.loads(p)["name"]:json.loads(p) for t,p,_,_ in client.messages
+                   if t.endswith("/config")}
+        self.assertEqual(configs["Flow"]["json_attributes_topic"],root+"/flow/attributes")
+        self.assertEqual(configs["Firmware Version"]["entity_category"],"diagnostic")
+        decoded["records"] = []
+        # An invalid entire measurement frame is not published.
+        with self.assertRaises(ValueError):
+            publish_reading(client, decoded, "00000000")

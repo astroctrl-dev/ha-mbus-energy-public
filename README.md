@@ -1,6 +1,6 @@
-# Current app update: v2.8.0-beta.1 (beta)
+# Current app update: v2.8.0 (stable)
 
-This update adds passive flow measurement and averaging intervals, firmware diagnostics, and last-occurrence error history using the existing frame-2 retrieval. The Home Assistant Meter Error History entity records the capture time, not an active fault. Excel adds Diagnostics and Error history sheets when data is available. No extra bus requests or battery estimates. Frame-5 acquisition and active battery warnings are not enabled; physical validation is pending. Back up before updating. See [changelog](mbus_probe/CHANGELOG.md).
+Adds five individually named historical diagnostic event sensors, a firmware sensor and flow timing attributes. Historical event dates are meter-local text; missing dates are unknown, not active alarms. Excel includes event names and individual historical read timestamps. Aligned existing historical stands and period metadata are preserved. No additional bus requests or estimated battery life. Frame-5 battery diagnostics are not enabled. Back up before updating. See [changelog](mbus_probe/CHANGELOG.md).
 
 # M-Bus T230 energy metering for Home Assistant
 

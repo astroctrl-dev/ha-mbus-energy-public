@@ -14,6 +14,13 @@ from mbus_records import passive_diagnostics
 HA_UNITS = {"kWh": "kWh", "m3": "m³", "kW": "kW", "m3/h": "m³/h",
             "C": "°C", "K": "K", "h": "h"}
 BRIDGE_AVAILABILITY = "mbus/t230/bridge/availability"
+ERROR_EVENTS = (
+    ("FT", "last_negative_temperature_difference", "Last Negative Temperature Difference (FT)"),
+    ("FF2", "last_reverse_flow", "Last Reverse Flow (FF2)"),
+    ("FS", "last_sensor_error", "Last Sensor Error (FS)"),
+    ("FE", "last_electronic_error", "Last Electronic Error (FE)"),
+    ("FF1", "last_flow_rate_error", "Last Flow Rate Error (FF1)"),
+)
 
 
 def device_key(meter_id):
@@ -43,6 +50,8 @@ def discovery_messages(meter_id):
             "availability_mode": "all", "unit_of_measurement": HA_UNITS[unit],
             "state_class": state_class,
         }
+        if kind == "flow":
+            payload["json_attributes_topic"] = f"mbus/t230/{key}/flow/attributes"
         if kind == DIFFERENCE:
             # Keep the native K value and let HA convert intervals without an offset.
             payload["device_class"] = "temperature_delta"
@@ -50,6 +59,7 @@ def discovery_messages(meter_id):
             payload["device_class"] = device_class
         messages.append((topic, json.dumps(payload), True))
     for kind, label in (("meter_status", "M-Bus status"),
+                        ("firmware_version", "Firmware Version"),
                         ("data_quality", "Datakvalitet"),
                         ("meter_local_time", "Målerklokke (lokal tid)"),
                         ("meter_summer_time", "Målerens sommertidbit"),
@@ -156,23 +166,29 @@ def publish_history(client, meter_id, snapshot):
         result.wait_for_publish(timeout=5)
     errors = snapshot.get("error_history")
     if isinstance(errors, dict) and isinstance(errors.get("read_at_utc"), str):
-        kind = "meter_error_history"
-        root = f"mbus/t230/{key}/{kind}"
-        payload = {"name": "Meter Error History", "unique_id": f"mbus_t230_{key}_{kind}",
-                   "device": {"identifiers": [f"mbus_t230_{key}"]},
-                   "state_topic": root + "/state", "json_attributes_topic": root + "/attributes",
-                   "device_class": "timestamp", "entity_category": "diagnostic",
-                   "availability": [{"topic": BRIDGE_AVAILABILITY}]}
-        for target, value, retain in (
-                (f"homeassistant/sensor/mbus_t230_{key}_{kind}/config", json.dumps(payload), True),
-                (root + "/attributes", json.dumps({"last_occurrence_local": {
-                    code: errors.get("last_occurrence_local", {}).get(code)
-                    for code in ("FT", "FS", "FE", "FF1", "FF2")},
-                    "time_basis": "meter_local_unspecified", "active_faults": "not_inferred"}), True),
-                (root + "/state", errors["read_at_utc"], True)):
-            result = client.publish(target, value, qos=1, retain=retain)
+        for code, kind, label in ERROR_EVENTS:
+            root = f"mbus/t230/{key}/{kind}"
+            payload = {"name": label, "unique_id": f"mbus_t230_{key}_{kind}",
+                       "device": {"identifiers": [f"mbus_t230_{key}"]},
+                       "state_topic": root + "/state", "json_attributes_topic": root + "/attributes",
+                       "entity_category": "diagnostic",
+                       "availability": [{"topic": availability_topic(key)}, {"topic": BRIDGE_AVAILABILITY}],
+                       "availability_mode": "all"}
+            # Meter-local wall time has no proven UTC offset. Publish text.
+            value = errors.get("last_occurrence_local", {}).get(code)
+            for target, data in (
+                    (f"homeassistant/sensor/mbus_t230_{key}_{kind}/config", json.dumps(payload)),
+                    (root + "/attributes", json.dumps({"code": code, "read_at_utc": errors["read_at_utc"],
+                        "time_basis": "meter_local_unspecified", "active_faults": "not_inferred"})),
+                    (root + "/state", value or "unknown")):
+                result = client.publish(target, data, qos=1, retain=True)
+                if result.rc:
+                    raise ConnectionError("MQTT error event publish failed")
+                result.wait_for_publish(timeout=5)
+        for topic in obsolete_error_topics(key):
+            result = client.publish(topic, "", qos=1, retain=True)
             if result.rc:
-                raise ConnectionError("MQTT error history publish failed")
+                raise ConnectionError("MQTT obsolete error history cleanup failed")
             result.wait_for_publish(timeout=5)
     setting = snapshot.get("monthly_set_day")
     if isinstance(setting, dict) and all(type(setting.get(k)) is int for k in ("day", "hour", "minute")):
@@ -288,12 +304,18 @@ def publish_reading(client, decoded, meter_id, read_at_utc=None, clock_attribute
         if result.rc:
             raise ConnectionError("MQTT diagnostic publish failed")
         result.wait_for_publish(timeout=5)
-    result = client.publish(f"mbus/t230/{key}/meter_status/attributes",
-                            json.dumps({**passive_diagnostics(decoded), "read_at_utc": read_at_utc}),
-                            qos=1, retain=False)
-    if result.rc:
-        raise ConnectionError("MQTT meter diagnostic attributes publish failed")
-    result.wait_for_publish(timeout=5)
+    diagnostics = passive_diagnostics(decoded)
+    for suffix, payload in (
+            ("flow/attributes", json.dumps({
+                name: diagnostics[name] for name in
+                ("flow_measurement_interval_seconds", "flow_averaging_interval_seconds")})),
+            ("meter_status/attributes", json.dumps({
+                "extension_byte": diagnostics["extension_byte"], "read_at_utc": read_at_utc})),
+            ("firmware_version/state", diagnostics["firmware_version"] or "unknown")):
+        result = client.publish(f"mbus/t230/{key}/{suffix}", payload, qos=1, retain=False)
+        if result.rc:
+            raise ConnectionError("MQTT meter diagnostic publish failed")
+        result.wait_for_publish(timeout=5)
     if clock_attributes is not None:
         result = client.publish(f"mbus/t230/{key}/meter_local_time/attributes",
                                 json.dumps(clock_attributes), qos=1, retain=False)
@@ -312,13 +334,22 @@ def mark_unavailable(client, meter_id):
                           "offline", qos=1, retain=True)
 
 
+def obsolete_error_topics(key):
+    return (f"homeassistant/sensor/mbus_t230_{key}_meter_error_history/config",
+            f"mbus/t230/{key}/meter_error_history/state",
+            f"mbus/t230/{key}/meter_error_history/attributes")
+
+
 def cleanup_discovery(client, meter_id):
     """Remove retained discovery on explicit uninstall or identity change."""
     mark_unavailable(client, meter_id).wait_for_publish(timeout=5)
     key = device_key(meter_id)
-    history_cleanup = [(f"homeassistant/sensor/mbus_t230_{key}_meter_error_history/config", "", True),
-                       (f"mbus/t230/{key}/meter_error_history/state", "", True),
-                       (f"mbus/t230/{key}/meter_error_history/attributes", "", True)]
+    history_cleanup = [(topic, "", True) for topic in obsolete_error_topics(key)]
+    for _, kind, _ in ERROR_EVENTS:
+        history_cleanup.extend((topic, "", True) for topic in (
+            f"homeassistant/sensor/mbus_t230_{key}_{kind}/config",
+            f"mbus/t230/{key}/{kind}/state",
+            f"mbus/t230/{key}/{kind}/attributes"))
     for topic, _, _ in list(discovery_messages(meter_id)) + list(history_discovery_messages(meter_id)) + history_cleanup:
         result = client.publish(topic, "", qos=1, retain=True)
         if result.rc:

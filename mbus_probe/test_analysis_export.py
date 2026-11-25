@@ -128,6 +128,6 @@ class DiagnosticExportTests(unittest.TestCase):
                                  "last_occurrence_local":{"FT":"2026-11-22T19:03"}}
         wb = load_workbook(BytesIO(make_xlsx([], snap)), read_only=True, data_only=True)
         rows = list(wb["Error history"].values)
-        self.assertEqual(rows[1][2:], ("FT", "2026-11-22T19:03", "not_inferred"))
+        self.assertEqual(rows[1][2:], ("FT", "2026-11-22T19:03", "not_inferred", "Last Negative Temperature Difference (FT)"))
         self.assertIsNone(rows[2][3])
         wb.close()

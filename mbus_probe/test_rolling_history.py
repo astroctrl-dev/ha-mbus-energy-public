@@ -39,3 +39,13 @@ class RollingHistoryTests(unittest.TestCase):
         old = merge_history(None,self.snapshot(1000,10),"old")
         with self.assertRaises(ValueError):
             merge_history(old,self.snapshot(2000,11),"new")
+
+    def test_overlap_preserves_existing_period_metadata(self):
+        old = merge_history(None,self.snapshot(1000,10),"old")
+        old["bounded_periods"][0]["meter_end_date"] = "2026-10-01T00:00"
+        old["bounded_periods"][0]["date_source"] = "meter_verified"
+        new = merge_history(old,self.snapshot(1010,11),"new")
+        self.assertEqual(new["bounded_periods"][1]["meter_end_date"],"2026-10-01T00:00")
+        self.assertEqual(new["bounded_periods"][1]["date_source"],"meter_verified")
+        self.assertEqual(new["bounded_periods"][1]["period_kwh"],10)
+        self.assertEqual(new["bounded_periods"][1]["newer_storage"],3)

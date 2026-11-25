@@ -1,3 +1,11 @@
+# 2.8.0
+
+- Five separate diagnostic event sensors with original codes FT, FF2, FS, FE and FF1. The beta aggregate entity is removed on publication of saved event history.
+- Firmware Version is a separate diagnostic sensor. Flow timing intervals are attributes of Flow; extension byte and read time remain on M-Bus status.
+- Preserve aligned historical period metadata as well as cumulative stands; reject conflicting saved periods.
+- Append individual read timestamps and descriptive event names to Excel. Existing columns remain.
+- No extra bus transactions, battery estimates or active frame-5 acquisition. Automated tests and build passed; new entity discovery and preservation of historical provenance still require physical confirmation.
+
 # 2.8.0-beta.1
 
 - Add flow measurement and averaging intervals, firmware version and raw extension byte to the existing meter status attributes.

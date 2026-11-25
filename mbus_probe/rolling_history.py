@@ -35,6 +35,16 @@ def merge_history(previous, incoming, read_at, *, replace=False):
             new[i] = prior
     for i, period in enumerate(result["bounded_periods"]):
         newer, older = new[i:i+2]
+        if not replace and shift is not None and i >= shift:
+            old_periods = previous.get("bounded_periods", [])
+            if len(old_periods) == 23:
+                prior = deepcopy(old_periods[i-shift])
+                if prior.get("period_kwh") != period["period_kwh"]:
+                    raise ValueError("saved period conflicts with aligned meter stands")
+                prior.update(newer_storage=period["newer_storage"],
+                             older_storage=period["older_storage"])
+                result["bounded_periods"][i] = prior
+                continue
         period.update(estimated_start_date=older.get("estimated_date"),
                       estimated_end_date=newer.get("estimated_date"),
                       newer_read_at_utc=newer.get("read_at_utc"),

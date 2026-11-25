@@ -218,21 +218,23 @@ def make_xlsx(samples, history=None, language='en-GB', temperature_unit=None):
         stands = wb.create_sheet("Månedshistorikk")
         stands.append(("alias", "storage", "month_back", "cumulative_kwh",
                        "meter_date", "estimated_date", "date_source", "captured_at_utc",
-                       "rollover_evidence"))
+                       "rollover_evidence", "read_at_utc"))
         periods = wb.create_sheet("Månedsforbruk")
         periods.append(("alias", "newer_storage", "older_storage", "period_kwh",
                         "meter_start_date", "meter_end_date", "estimated_start_date",
-                        "estimated_end_date", "date_source", "rollover_evidence"))
+                        "estimated_end_date", "date_source", "rollover_evidence",
+                        "read_at_utc", "newer_read_at_utc", "older_read_at_utc"))
         errors = None
         if any(snapshot.get("error_history") for _, snapshot in histories):
             errors = wb.create_sheet("Error history")
-            errors.append(("alias", "read_at_utc", "code", "last_occurrence_meter_local", "active_status"))
+            errors.append(("alias", "read_at_utc", "code", "last_occurrence_meter_local", "active_status", "event_name"))
         for alias, snapshot in histories:
             if errors is not None and snapshot.get("error_history"):
                 data = snapshot["error_history"]
                 for code in ("FT", "FS", "FE", "FF1", "FF2"):
                     errors.append((alias, data.get("read_at_utc"), code,
-                                   data.get("last_occurrence_local", {}).get(code), "not_inferred"))
+                                   data.get("last_occurrence_local", {}).get(code), "not_inferred",
+                                   {"FT":"Last Negative Temperature Difference (FT)","FF2":"Last Reverse Flow (FF2)","FS":"Last Sensor Error (FS)","FE":"Last Electronic Error (FE)","FF1":"Last Flow Rate Error (FF1)"}[code]))
             provenance = snapshot.get("date_provenance", {})
             for field in ("history_read_at_utc", "normal_read_at_utc",
                           "meter_local_time_at_normal", "meter_summer_time_at_normal",
@@ -245,13 +247,15 @@ def make_xlsx(samples, history=None, language='en-GB', temperature_unit=None):
             for r in snapshot["stands"]:
                 stands.append((alias, r["storage"], r["month_back"], r["cumulative_kwh"],
                                r["meter_date"], r.get("estimated_date"), r["date_source"],
-                               snapshot["captured_at_utc"], snapshot.get("rollover_evidence", "not_observed")))
+                               snapshot["captured_at_utc"], snapshot.get("rollover_evidence", "not_observed"),
+                               r.get("read_at_utc")))
             for r in snapshot["bounded_periods"]:
                 periods.append((alias,) + tuple(r.get(k) for k in
                                ("newer_storage", "older_storage", "period_kwh",
                                 "meter_start_date", "meter_end_date", "estimated_start_date",
                                 "estimated_end_date", "date_source")) +
-                               (snapshot.get("rollover_evidence", "not_observed"),))
+                               (snapshot.get("rollover_evidence", "not_observed"),
+                                r.get("read_at_utc"), r.get("newer_read_at_utc"), r.get("older_read_at_utc")))
     for sheet in wb:
         sheet.freeze_panes = "A2"
         sheet.auto_filter.ref = sheet.dimensions

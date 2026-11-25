@@ -51,7 +51,7 @@ async function refreshHistory() {
       label.textContent = localText("ERROR_HISTORY_TITLE") + ": " + (errors.read_at_utc ?? "—");
       area.append(label);
       const list = document.createElement("p");
-      list.textContent = ["FT","FS","FE","FF1","FF2"].map(code => code + ": " + (errors.last_occurrence_local?.[code] ?? localText("DST_UNKNOWN"))).join("; ");
+      list.textContent = Object.entries({"FT":"Last Negative Temperature Difference (FT)","FF2":"Last Reverse Flow (FF2)","FS":"Last Sensor Error (FS)","FE":"Last Electronic Error (FE)","FF1":"Last Flow Rate Error (FF1)"}).map(([code,label]) => label + ": " + (errors.last_occurrence_local?.[code] ?? "—")).join("; ");
       area.append(list);
       const note = document.createElement("p"); note.textContent = localText("ERROR_HISTORY_NOTE"); area.append(note);
     }
