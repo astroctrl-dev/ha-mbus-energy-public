@@ -21,7 +21,16 @@ def active_projection(extension, *, layout_verified=False):
     codes = flags["active_fault_codes"]
     flow = {"flow_fault": "F0" in codes}
     flow.update({key: flags[key] for key in FLOW_FIELDS if key != "flow_fault"})
+    installation = {
+        "mounting_side": "flow" if flags["installation_in_flow"] else "return",
+        **{key: flags[key] for key in (
+            "wrong_sensor_installation", "wrong_volume_installation",
+            "negative_flow", "negative_temperature_difference")},
+    }
     return {
+        "meter_installation_status": "warning" if any(
+            value is True for value in installation.values()) else "normal",
+        "installation_attributes": installation,
         "active_meter_faults": bool(codes),
         "fault_messages": [f"{code} - {FAULT_LABELS[int(code[1:])]}" for code in codes],
         "flow_warning": any(flow.values()),

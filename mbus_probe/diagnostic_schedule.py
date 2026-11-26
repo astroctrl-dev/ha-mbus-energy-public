@@ -9,7 +9,7 @@ import hashlib
 import json
 import os
 import threading
-from datetime import datetime
+from datetime import datetime, time
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -22,14 +22,17 @@ class DiagnosticSchedule:
         self.lock = threading.Lock()
 
     def reserve(self, meter_id, now, *, enabled=False, layout_verified=False,
-                fresh_normal=False, bus_idle=False):
+                fresh_normal=False, bus_idle=False, check_only=False):
         if not all(x is True for x in (enabled, layout_verified, fresh_normal, bus_idle)):
             return False
         if not isinstance(now, datetime) or now.utcoffset() is None:
             return False
         if not isinstance(meter_id, str) or len(meter_id) != 8 or not meter_id.isascii() or not meter_id.isdigit():
             return False
-        day = now.astimezone(self.zone).date().isoformat()
+        local = now.astimezone(self.zone)
+        if local.time() < time(3, 15):
+            return False
+        day = local.date().isoformat()
         key = hashlib.sha256(("diagnostic:" + meter_id).encode()).hexdigest()
         with self.lock:
             try:
@@ -46,6 +49,8 @@ class DiagnosticSchedule:
                         return False
                 if state.get(key, "") >= day:
                     return False
+                if check_only:
+                    return True
                 state[key] = day
                 self.root.mkdir(parents=True, exist_ok=True)
                 temp = self.path.with_suffix(".tmp")

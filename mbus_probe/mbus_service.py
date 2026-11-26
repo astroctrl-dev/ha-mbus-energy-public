@@ -369,7 +369,10 @@ def main():
         on_complete=lambda meter_id,snapshot: publish_history(client,meter_id,snapshot))
     history_controller.require_startup_normal()
     from diagnostic_runtime import DiagnosticRuntime
-    config["_diagnostic_runtime"] = DiagnosticRuntime()
+    # Release candidate: strict observed firmware layout only.
+    config["_frame5_layout_approved"] = True
+    config["_diagnostic_runtime"] = DiagnosticRuntime(
+        root="/data/analysis" if config.get("_frame5_layout_approved") is True else None)
     server = serve(registry, config, client, bus_lock, STOP, raw_log=raw_log,
                    history_controller=history_controller)
     maintenance = MaintenanceSchedule(config, server.clock_controller, server.history_controller, STOP)

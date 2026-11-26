@@ -479,8 +479,8 @@ class HistoryController:
                               "captured_at_utc":None}
             raise
 
-    def capture_diagnostic_dev(self, meter_id, *, approved=False, reader=None):
-        """Bounded evidence collection, never called by automatic polling.
+    def capture_diagnostic_dev(self, meter_id, *, approved=False, reader=None, reserve=None):
+        """Bounded diagnostic collection using the common bus transaction guard.
         Use the common lock and durable restoration marker. No state projection.
         """
         from frame5_capture import read_capture, CaptureError
@@ -497,6 +497,8 @@ class HistoryController:
                 address = self.registry.selected.get(meter_id)
                 if address is None or len(self.registry.selected) != 1 or self.stop.is_set() or self.blocked.is_set() or self.marker.exists() or getattr(self.registry, "scan_status", None) == "running":
                     raise ValueError("one selected meter and verified normal mode required")
+                if reserve is not None and not reserve():
+                    raise ValueError("daily diagnostic reservation unavailable")
                 self.root.mkdir(parents=True, exist_ok=True)
                 try:
                     with self.marker.open("w") as guard:

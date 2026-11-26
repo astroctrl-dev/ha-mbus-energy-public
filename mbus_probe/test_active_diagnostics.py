@@ -46,3 +46,14 @@ class ActiveDiagnosticsTests(unittest.TestCase):
         for raw in (None, "0xGG", "0x123", "zz", "0x-1"):
             self.assertIsNone(extension_projection(raw)["extension_byte_warning"])
         self.assertTrue(extension_projection("0x00")["extension_byte_warning"])
+
+    def test_installation_status(self):
+        for raw, expected, side in (("80 00 00", "normal", "flow"),
+                                    ("04 00 00", "warning", "return"),
+                                    ("02 00 00", "normal", "return")):
+            p = active_projection(bytes.fromhex(raw), layout_verified=True)
+            self.assertEqual(p["meter_installation_status"], expected)
+            self.assertEqual(p["installation_attributes"]["mounting_side"], side)
+        for bit in (2, 3, 4, 5):
+            p = active_projection(bytes((1 << bit, 0, 0)), layout_verified=True)
+            self.assertEqual(p["meter_installation_status"], "warning")

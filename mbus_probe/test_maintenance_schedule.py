@@ -217,3 +217,34 @@ class ScheduleTests(unittest.TestCase):
         self.schedule.on_valid_round([meter])
         self.assertTrue(store.load()["dst_transition_failed"])
         self.assertEqual(store.load()["incidents"][-1]["result"], "intervention_unverified")
+
+
+class DailyDiagnosticsIntegrationTests(unittest.TestCase):
+    def test_daily_capture_and_restart_reservation(self):
+        from types import SimpleNamespace
+        from pathlib import Path
+        from diagnostic_runtime import DiagnosticRuntime
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as root:
+            now = datetime(2026,11,26,3,15,tzinfo=ZoneInfo("Europe/Oslo"))
+            meter = "00000000"
+            runtime = DiagnosticRuntime(now=lambda: now)
+            clock = FakeController("verified")
+            history = FakeController("complete")
+            history.blocked = threading.Event()
+            history.marker = Path(root)/"restore-marker"
+            history.registry = SimpleNamespace(snapshot=lambda: {"selected":[{"meter_id":meter}], "scan_status":"completed"})
+            raw = Path(__file__).with_name("fixture_t230_frame5_sanitized.hex").read_text()
+            def capture(meter_id, *, approved, reserve):
+                self.assertTrue(reserve())
+                return {"response_hex":raw,"read_at_utc":now.isoformat(),"normal_layout_detected":False}
+            history.capture_diagnostic_dev = Mock(side_effect=capture)
+            config = {"_diagnostic_runtime":runtime, "_frame5_layout_approved":True}
+            for _ in range(2):
+                schedule = MaintenanceSchedule(config,clock,history,threading.Event(),now=lambda:now,root=root)
+                schedule.on_valid_round([meter])
+                if schedule.worker:
+                    schedule.worker.join(2)
+            self.assertEqual(history.capture_diagnostic_dev.call_count, 1)
+            self.assertEqual(runtime.snapshot(meter)["battery_status"],"normal")
+            self.assertEqual(runtime.snapshot(meter)["meter_installation_status"],"warning")

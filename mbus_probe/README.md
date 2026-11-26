@@ -31,7 +31,7 @@ Extended archive retrieval can be stopped at a safe transaction boundary and res
 
 ## Updates and rollback
 
-The current stable release is v2.9.1. Existing entity IDs, app slug and stored history are preserved; no data migration is required for upgrades from v2.9.0 or v2.9.1 betas. The application now coordinates M-Bus transmissions using a shared timing gate and skips missed polling slots. Back up app data and settings, update through Settings → Apps, and verify meter selection, MQTT entities and fresh readings. On failure, stop, restore the previous app version and corresponding backup, restart and verify MQTT and normal-frame status. Never run two copies against the same adapter and MQTT identities.
+Version 2.9.2 preserves existing entity IDs and stored history. Existing entity IDs, app slug and stored history are preserved; no data migration is required for upgrades from v2.9.0 or v2.9.1 betas. The application now coordinates M-Bus transmissions using a shared timing gate and skips missed polling slots. Back up app data and settings, update through Settings → Apps, and verify meter selection, MQTT entities and fresh readings. On failure, stop, restore the previous app version and corresponding backup, restart and verify MQTT and normal-frame status. Never run two copies against the same adapter and MQTT identities.
 
 ## Clock synchronization
 
@@ -62,6 +62,14 @@ The app publishes energy in kWh, power in kW, volume in m³, flow in m³/h and t
 Before updating from v2.4.0, back up app data and Home Assistant. Verify entity IDs, temperature units, long-term statistics, regular polling, saved history and Excel export afterwards. In particular, verify the existing temperature-difference sensor after the discovery device-class change. If validation fails, stop the app and restore the known-good v2.4.0 version and backup as appropriate. Do not delete existing entities to work around unit problems.
 
 
-## v2.9.2-beta.1 diagnostic evidence test
+## Active diagnostics (v2.9.2)
 
-This beta candidate is intended to establish the physical frame-5 layout, not to claim working active fault or battery decoding. In an isolated test installation with a single selected meter, verify ordinary readings before enabling allow_diagnostic_capture. Save and restart, then use Capture frame 5 (test) and confirm once. Wait for the transaction and normal restoration to finish. Show capture evidence displays the result; the header meter ID is replaced and checksum recomputed, but other payload fields may contain private data. Review before sharing. Verify fresh ordinary readings and preserved history afterwards. Disable the capture option when finished. Automatic diagnostic acquisition is not enabled. Battery Status and active fault states remain unknown until verified evidence is integrated. No percentage is measured.
+- Battery Status: normal, pre-warning, exhausted or unknown; no measured charge percentage.
+- Active Meter Faults, Flow Warning and Meter Installation Status.
+- Automatic frame-5 acquisition once per local calendar day, at or after 03:15 in clock_timezone, after a valid ordinary reading and when maintenance permits.
+- Last valid diagnostic sample retained across restarts; unknown after 26 hours.
+- Supported active diagnostic layout: observed T230 firmware 7.12, single selected meter. Unsupported layouts are rejected.
+- Optional manual capture requires allow_diagnostic_capture and confirmation. Raw evidence is not fully anonymized; review before sharing.
+- Normal-frame restoration is mandatory before ordinary polling resumes.
+
+Physical capture and offline regression tests cover the observed layout. Live automatic scheduling and final Web UI behavior have not yet been verified on hardware. Back up before upgrading; restore the previous app and backup if normal polling cannot be recovered.

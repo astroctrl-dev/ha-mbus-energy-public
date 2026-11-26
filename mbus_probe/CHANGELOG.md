@@ -1,3 +1,18 @@
+## v2.9.2
+
+- Daily frame-5 diagnostics at 03:15 local time
+- Battery Status, Active Meter Faults and Flow Warning
+- Meter Installation Status and mounting attributes
+- Persistent diagnostic samples; 26-hour validity
+- Manual capture and inline Web UI evidence
+- Strict firmware 7.12 layout validation; single selected meter
+- Shared bus guard and verified normal-frame recovery
+- Existing entity IDs and history preserved
+
+**Limitations**
+- Live automatic acquisition and final UI hardware acceptance pending
+- Unsupported frame layouts remain unknown
+
 ## v2.9.2-beta.1
 
 - Active meter fault diagnostics (F0–F9)
