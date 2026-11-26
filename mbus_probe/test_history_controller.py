@@ -205,6 +205,23 @@ class ArchiveControllerTests(unittest.TestCase):
         save_snapshot(self.path,self.saved)
         self.original = self.path.read_bytes()
 
+    def test_stored_archive_progress_is_local_and_requires_complete_evidence(self):
+        from history_controller import stored_archive_progress
+        import copy
+        saved = copy.deepcopy(self.saved)
+        self.assertEqual(stored_archive_progress(saved), {})
+        evidence = {"cumulative_m3": 0, "meter_storage_local_time": "2026-11-01T00:00:00",
+                    "maxima": {k: {"value": 0, "meter_local_time": "2026-10-01T00:00:00",
+                                   "read_at_utc": "2026-11-25T10:00:00Z"}
+                               for k in ("power", "flow", "flow_temperature", "return_temperature")}}
+        saved["stands"][0]["frame4"] = evidence
+        saved["stands"][1]["frame4"] = copy.deepcopy(evidence)
+        del saved["stands"][1]["frame4"]["maxima"]["power"]["read_at_utc"]
+        with patch.object(self.controller, "collect_archive_dev", side_effect=AssertionError("bus access")) as read:
+            self.assertEqual(stored_archive_progress(saved), {str(saved["stands"][0]["month_back"]): "stored"})
+            read.assert_not_called()
+        self.assertEqual(self.path.read_bytes(), self.original)
+
     def test_dev_approval_required(self):
         with patch("history_controller.shared_timing_active",return_value=True):
             with self.assertRaises(ValueError):

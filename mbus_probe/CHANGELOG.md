@@ -1,3 +1,8 @@
+## v2.9.1-beta.2
+
+- Show complete locally stored extended archive positions as Already stored on startup; unread or incomplete positions remain unmarked. Preserve retrieval and Stop job statuses. No additional M-Bus requests.
+- Manual beta.1 acceptance: 21/21 checklist items reported passed by product owner. Beta.2 validation pending.
+
 ## v2.9.1-beta.1
 
 - Retry recoverable extended archive errors up to three times per position and continue with remaining positions after verified normal-mode restoration.

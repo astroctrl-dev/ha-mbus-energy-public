@@ -42,6 +42,22 @@ def load_history(root, selected):
     return result
 
 
+def archive_position_complete(row):
+    """Same persisted-evidence criterion for retrieval and read-only UI status."""
+    evidence = row.get("frame4") or {}
+    maxima = evidence.get("maxima") or {}
+    return bool(evidence.get("cumulative_m3") is not None and evidence.get("meter_storage_local_time")
+                and all(maxima.get(k,{}).get("value") is not None and
+                        maxima.get(k,{}).get("meter_local_time") and maxima.get(k,{}).get("read_at_utc")
+                        for k in ("power","flow","flow_temperature","return_temperature")))
+
+
+def stored_archive_progress(snapshot):
+    """Derive idle status from saved data only; missing positions remain unmarked."""
+    return {str(row["month_back"]): "stored" for row in snapshot["stands"]
+            if archive_position_complete(row)}
+
+
 class HistoryController:
     def __init__(self, registry, config, bus_lock, stop, root="/data/analysis",
                  reader=read_months, pause=time.sleep, on_complete=None):
@@ -336,12 +352,7 @@ class HistoryController:
                 if self.stop.is_set() or self.cancel_requested.is_set():
                     break
                 position = row["month_back"]
-                evidence = row.get("frame4") or {}
-                maxima = evidence.get("maxima") or {}
-                if (evidence.get("cumulative_m3") is not None and evidence.get("meter_storage_local_time")
-                    and all(maxima.get(k,{}).get("value") is not None and
-                            maxima.get(k,{}).get("meter_local_time") and maxima.get(k,{}).get("read_at_utc")
-                            for k in ("power","flow","flow_temperature","return_temperature"))):
+                if archive_position_complete(row):
                     self._archive_row(position,"stored")
                     continue
                 for attempt in range(1,4):

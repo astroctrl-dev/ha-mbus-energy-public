@@ -8,7 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from meter_discovery import scan_bus
 from analysis_export import load_samples, make_xlsx
-from history_controller import HistoryController, load_history
+from history_controller import HistoryController, load_history, stored_archive_progress
 from clock_maintenance import ClockController
 from clock_model import configured_local
 from dst_transition import TransitionStore
@@ -70,7 +70,7 @@ async function refreshHistory() {
     for (const label of ['Posisjon', 'Målerstand (kWh)', 'Forbruk siden neste eldre stand (kWh)', 'Status']) addCell(head, label, true);
     table.append(head);
     const periods = new Map(entry.snapshot.bounded_periods.map(p => [p.newer_storage, p.period_kwh]));
-    const progress = data.archive_alias === entry.alias ? data.archive_progress : {};
+    const progress = {...entry.stored_progress, ...(data.archive_alias === entry.alias ? data.archive_progress : {})};
     const statusLabels = {waiting:'Waiting',request:'Request',completed:'Completed',stored:'Already stored',failed:'Failed',aborted:'Aborted',retry2:'Retry 2/3',retry3:'Retry 3/3'};
     const statusColors = {waiting:'#777',request:'#a66b00',completed:'#17803d',stored:'#17803d',failed:'#b91c1c',aborted:'#777',retry2:'#a66b00',retry3:'#a66b00'};
     for (const stand of entry.snapshot.stands) {
@@ -322,7 +322,8 @@ def serve(registry, config, client, bus_lock, stop, port=8099, history_controlle
                                  "clock_target": configured_local(datetime.now(ZoneInfo("UTC")), config.get("clock_timezone", "Europe/Oslo")).isoformat(timespec="minutes")})
             elif self.path.rstrip("/").endswith("/api/history"):
                 try:
-                    entries = [{"alias": alias, "snapshot": snapshot} for alias, snapshot in
+                    entries = [{"alias": alias, "snapshot": snapshot,
+                                "stored_progress": stored_archive_progress(snapshot)} for alias, snapshot in
                                load_history("/data/analysis", registry.snapshot()["selected"])]
                 except (OSError, ValueError, KeyError):
                     self._send(409, {"error": "Lagret historikk kunne ikke leses"})
