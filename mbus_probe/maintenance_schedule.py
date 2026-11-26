@@ -14,6 +14,8 @@ import time
 from datetime import datetime, timezone, timedelta
 from history_controller import history_file
 from monthly_retry import MonthlyRetry
+from diagnostic_schedule import DiagnosticSchedule
+from frame5_layout import extract_abcdef
 from zoneinfo import ZoneInfo
 from dst_transition import latest_transition, evaluate_transition, TransitionStore
 
@@ -30,6 +32,7 @@ class MaintenanceSchedule:
         self.root = Path(root)
         self.path = self.root / 'maintenance-calendar.json'
         self.monthly_retry = MonthlyRetry(self.root)
+        self.diagnostic_schedule = DiagnosticSchedule(self.root, self.zone.key)
         try:
             self.monthly_retry.reconcile_interrupted()
         except (OSError, ValueError, TypeError, AttributeError):
@@ -252,10 +255,46 @@ class MaintenanceSchedule:
                 filtered.append(key)
             jobs = filtered
             if not jobs:
+                # Diagnostics are lower priority than existing maintenance.
+                # Internal release gate stays closed until independent review.
+                runtime = self.config.get("_diagnostic_runtime")
+                if (runtime is not None and self.config.get("_frame5_layout_approved") is True
+                        and len(meter_ids) == 1 and not self.history.blocked.is_set()
+                        and not self.history.marker.exists()
+                        and len(self.history.registry.snapshot()["selected"]) == 1
+                        and self.history.registry.snapshot().get("scan_status") != "running"):
+                    meter_id = meter_ids[0]
+                    if self.diagnostic_schedule.reserve(meter_id, local, enabled=True,
+                            layout_verified=True, fresh_normal=True, bus_idle=True, check_only=True):
+                        self.worker = threading.Thread(target=self._execute_diagnostic,
+                                                       args=(meter_id,), daemon=True)
+                        self.worker.start()
                 return
             # One job per round; a fresh normal read is required before another.
             self.worker = threading.Thread(target=self._execute, args=(jobs[0],), daemon=True)
             self.worker.start()
+
+    def _execute_diagnostic(self, meter_id):
+        runtime = self.config["_diagnostic_runtime"]
+        try:
+            if self.stop.is_set() or self.clock.snapshot().get("status") == "running":
+                return
+            result = self.history.capture_diagnostic_dev(
+                meter_id, approved=True,
+                reserve=lambda: self.diagnostic_schedule.reserve(
+                    meter_id, self.now(), enabled=True, layout_verified=True,
+                    fresh_normal=True, bus_idle=True))
+            if result.get("normal_layout_detected"):
+                raise ValueError("normal response instead of frame 5")
+            frame = bytes.fromhex(result["response_hex"])
+            address = frame[5]
+            # Capture controller already verified selected address and meter
+            # identity under the shared registry/bus locks.
+            raw = extract_abcdef(frame, address, meter_id)
+            runtime.observe_verified(meter_id, raw, result["read_at_utc"], layout_verified=True)
+            LOG.info("Daily frame-5 diagnostic sample validated")
+        except (ValueError, OSError, RuntimeError, KeyError, IndexError, TypeError):
+            LOG.warning("Daily frame-5 diagnostics not verified; no new sample")
 
     def _execute(self, key):
         kind, meter_id, _ = key

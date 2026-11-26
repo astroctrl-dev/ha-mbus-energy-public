@@ -124,3 +124,18 @@ class Frame5GuardTests(unittest.TestCase):
             restore.assert_called_once()
         self.assertTrue(self.controller.blocked.is_set())
         self.assertTrue(self.controller.marker.exists())
+
+
+    def test_daily_reservation_inside_bus_guard(self):
+        previous = dict(self.controller.state)
+        def reserve():
+            self.assertTrue(self.controller.bus_lock.locked())
+            self.assertTrue(self.registry.lock.locked())
+            self.assertFalse(self.controller.marker.exists())
+            return False
+        with self.assertRaisesRegex(ValueError, "reservation unavailable"):
+            self.controller.capture_diagnostic_dev("00000000", approved=True,
+                reserve=reserve, reader=lambda *a, **k: self.fail("unexpected bus access"))
+        self.assertEqual(self.controller.state, previous)
+        self.assertFalse(self.controller.marker.exists())
+        self.assertFalse(self.controller.blocked.is_set())

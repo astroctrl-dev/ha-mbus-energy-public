@@ -30,6 +30,7 @@ PAGE = r"""<!doctype html><html lang="no"><meta charset="utf-8"><meta name="view
 const root = location.pathname.replace(/\/$/, '');
 let refreshing = false;
 let lastLists = '';
+let captureEvidenceVisible = false;
 let lastHistoryCapture = null;
 let lastArchiveRevision = -1;
 let historySubmitting = false;
@@ -145,6 +146,14 @@ function renderActiveDiagnostics(data) {
     detail.textContent = key.replaceAll('_', ' ') + ': ' + flag(value);
     section.append(detail);
   }
+  const installation = document.createElement('p');
+  installation.textContent = 'Meter Installation Status: ' + ({normal:'Normal', warning:'Warning', unknown:'Unknown'}[data.meter_installation_status] || 'Unknown');
+  section.append(installation);
+  for (const [key, value] of Object.entries(data.installation_attributes || {})) {
+    const detail = document.createElement('p');
+    detail.textContent = key.replaceAll('_', ' ') + ': ' + (typeof value === 'string' ? value : flag(value));
+    section.append(detail);
+  }
   const ext = data.extension || {};
   const extension = document.createElement('p');
   extension.textContent = 'Extension Byte Warning: ' + flag(ext.extension_byte_warning) +
@@ -181,7 +190,7 @@ async function refresh() {
     const busy = state.diagnostic_capture_running || historySubmitting || state.history.status === 'running' || state.clock.status === 'running' || state.scan_status === 'running';
     document.getElementById('scan').disabled = busy;
     document.getElementById('auto').disabled = busy || state.scan_status !== 'completed' || state.scan_errors.length > 0 || state.available.filter(m => m.supported).length !== 1;
-    const lists = JSON.stringify([busy, state.available, state.selected, state.history_enabled, state.history.status, state.history.manual_meter, state.history.stopping, state.clock_enabled, state.auto_clock_sync, state.clock.status, state.clock_target, state.migrations, state.dst_diagnostics, state.monthly_alarms, state.active_diagnostics, state.diagnostic_capture_enabled]);
+    const lists = JSON.stringify([busy, state.available, state.selected, state.history_enabled, state.history.status, state.history.manual_meter, state.history.stopping, state.clock_enabled, state.auto_clock_sync, state.clock.status, state.clock_target, state.migrations, state.dst_diagnostics, state.monthly_alarms, state.active_diagnostics, state.diagnostic_capture_enabled, state.diagnostic_capture_status]);
     if (lists !== lastLists) {
       lastLists = lists;
     for (const name of ['available', 'selected']) {
@@ -201,13 +210,23 @@ async function refresh() {
               finally { lastLists=''; await refresh(); }
             });
             capture.disabled = busy;
+            const status = document.createElement('p');
+            status.setAttribute('role','status');
+            status.textContent = 'Diagnostic capture: ' + (state.diagnostic_capture_status || 'not_started');
+            const output = document.createElement('pre');
+            output.style.cssText = 'width:100%;white-space:pre-wrap;overflow-wrap:anywhere';
+            output.setAttribute('role','status');
             const evidence = button('Show capture evidence', async () => {
+              captureEvidenceVisible = true;
+              output.textContent = 'Loading capture evidence…';
               try {
                 const result = await call('/api/diagnostic_capture');
-                document.getElementById('diagnostic-evidence').textContent = JSON.stringify(result, null, 2);
-              } catch(e) { document.getElementById('error').textContent=e.message; }
+                output.textContent = JSON.stringify(result, null, 2);
+                document.getElementById('diagnostic-evidence').textContent = '';
+              } catch(e) { output.textContent = 'Capture evidence unavailable: ' + e.message; }
             });
-            line.append(capture, evidence);
+            line.append(capture, status, evidence, output);
+            if (captureEvidenceVisible) evidence.click();
           }
           const dstState = (state.dst_diagnostics || {})[item.meter_id] || {};
           const diagnostic = document.createElement('p');
@@ -358,11 +377,24 @@ def serve(registry, config, client, bus_lock, stop, port=8099, history_controlle
             from frame5_capture import redact_capture
             result = history_controller.capture_diagnostic_dev(meter_id, approved=True)
             safe = redact_capture(result)
+            status = "normal_layout_detected" if safe.get("normal_layout_detected") else "complete"
+            if status == "complete" and config.get("_frame5_layout_approved") is True:
+                from frame5_layout import extract_abcdef
+                frame = bytes.fromhex(result["response_hex"])
+                raw = extract_abcdef(frame, frame[5], meter_id)
+                config["_diagnostic_runtime"].observe_verified(
+                    meter_id, raw, result["read_at_utc"], layout_verified=True)
+                safe["layout_verified"] = True
+                status = "verified"
             with capture_lock:
-                capture_state.update(status="normal_layout_detected" if safe.get("normal_layout_detected") else "complete", evidence=safe)
+                capture_state.update(status=status, evidence=safe)
         except (ValueError, OSError, RuntimeError):
             with capture_lock:
                 capture_state.update(status="failed", evidence=None)
+
+    def capture_status():
+        with capture_lock:
+            return capture_state['status']
 
     def capture_running():
         with capture_lock:
@@ -408,6 +440,7 @@ def serve(registry, config, client, bus_lock, stop, port=8099, history_controlle
                                  "dst_diagnostics": dst_diagnostics(),
                                  "diagnostic_capture_enabled": config.get("allow_diagnostic_capture") is True,
                                  "diagnostic_capture_running": capture_running(),
+                                 "diagnostic_capture_status": capture_status(),
                                  "active_diagnostics": {r["meter_id"]: config["_diagnostic_runtime"].snapshot(r["meter_id"])
                                                         if config.get("_diagnostic_runtime") else {"battery_status":"unknown"}
                                                         for r in registry.snapshot()["selected"]},

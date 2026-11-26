@@ -108,6 +108,14 @@ def discovery_messages(meter_id):
                     "availability": [{"topic": availability}, {"topic": BRIDGE_AVAILABILITY}],
                     "availability_mode": "all", "entity_category": "diagnostic",
                     "icon": "mdi:battery-unknown"}), True))
+    messages.append((f"homeassistant/sensor/mbus_t230_{key}_meter_installation_status/config",
+        json.dumps({"name": "Meter Installation Status",
+                    "unique_id": f"mbus_t230_{key}_meter_installation_status",
+                    "device": device, "state_topic": f"mbus/t230/{key}/meter_installation_status/state",
+                    "json_attributes_topic": f"mbus/t230/{key}/meter_installation_status/attributes",
+                    "availability": [{"topic": availability}, {"topic": BRIDGE_AVAILABILITY}],
+                    "availability_mode": "all", "entity_category": "diagnostic",
+                    "icon": "mdi:pipe"}), True))
     return messages
 
 
@@ -125,10 +133,12 @@ def publish_active_diagnostics(client, meter_id, extension=None, read_at_utc=Non
         ("active_meter_faults", values.get("active_meter_faults"),
          {"fault_messages": values.get("fault_messages")}),
         ("flow_warning", values.get("flow_warning"), values.get("flow_attributes") or {}),
+        ("meter_installation_status", values.get("meter_installation_status", "unknown"),
+         values.get("installation_attributes") or {}),
         ("battery_status", battery_status(observed),
          {"battery_prewarning": values.get("battery_prewarning"),
           "battery_exhausted": values.get("battery_exhausted")})):
-        state = value if kind == "battery_status" else (
+        state = value if kind in ("battery_status", "meter_installation_status") else (
             "ON" if value is True else "OFF" if value is False else "None")
         for suffix, payload in (("attributes", json.dumps({**common, **attrs})), ("state", state)):
             result = client.publish(f"mbus/t230/{key}/{kind}/{suffix}", payload, qos=1, retain=False)

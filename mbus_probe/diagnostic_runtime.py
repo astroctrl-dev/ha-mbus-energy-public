@@ -3,6 +3,10 @@
 No frame offset is assumed. The production caller must not accept an
 observation until an independently verified layout parser exists.
 """
+import hashlib
+import json
+import os
+from pathlib import Path
 from datetime import datetime, timezone
 from threading import Lock
 from active_diagnostics import active_projection, extension_projection
@@ -27,11 +31,55 @@ def fresh_projection(extension, stamp, *, layout_verified=False, now=None):
 
 
 class DiagnosticRuntime:
-    def __init__(self, now=lambda: datetime.now(timezone.utc)):
+    def __init__(self, now=lambda: datetime.now(timezone.utc), *, root=None):
         self.now = now
         self.lock = Lock()
+        self.root = Path(root) / 'active-diagnostics' if root is not None else None
         self.samples = {}
         self.passive = {}
+
+    def _path(self, meter_id):
+        if not isinstance(meter_id, str) or len(meter_id) != 8 or not meter_id.isascii() or not meter_id.isdigit():
+            raise ValueError("invalid meter identity")
+        return self.root / (hashlib.sha256(("diagnostic:" + meter_id).encode()).hexdigest() + ".json")
+
+    def _load(self, meter_id):
+        if meter_id in self.samples:
+            return self.samples[meter_id]
+        if self.root is not None:
+            try:
+                data = json.loads(self._path(meter_id).read_text(encoding="utf-8"))
+                if data["schema"] != "t230-frame5-7.12-v1":
+                    return None, None
+                raw, stamp = bytes.fromhex(data["abcdef"]), data["read_at_utc"]
+                if fresh_projection(raw, stamp, layout_verified=True, now=self.now()) is not None:
+                    self.samples[meter_id] = (raw, stamp)
+                    return raw, stamp
+            except (OSError, ValueError, TypeError, KeyError, AttributeError):
+                pass
+        return None, None
+
+    def _save(self, meter_id, raw, stamp):
+        if self.root is None:
+            return
+        path = self._path(meter_id)
+        self.root.mkdir(parents=True, exist_ok=True)
+        temp = path.with_suffix(".tmp")
+        try:
+            with temp.open("w", encoding="utf-8") as out:
+                json.dump({"schema": "t230-frame5-7.12-v1", "abcdef": raw.hex(),
+                           "read_at_utc": stamp}, out)
+                out.flush()
+                os.fsync(out.fileno())
+            os.chmod(temp, 0o600)
+            os.replace(temp, path)
+            fd = os.open(self.root, os.O_RDONLY)
+            try:
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+        finally:
+            temp.unlink(missing_ok=True)
 
     def observe_normal(self, meter_id, raw, stamp):
         with self.lock:
@@ -42,23 +90,34 @@ class DiagnosticRuntime:
         if fresh_projection(extension, stamp, layout_verified=layout_verified, now=self.now()) is None:
             raise ValueError("unverified or stale diagnostic observation")
         with self.lock:
+            self._save(meter_id, bytes(extension), stamp)
             self.samples[meter_id] = (bytes(extension), stamp)
 
     def invalidate(self, meter_id):
         with self.lock:
+            if self.root is not None:
+                path = self._path(meter_id)
+                path.unlink(missing_ok=True)
+                if self.root.exists():
+                    fd = os.open(self.root, os.O_RDONLY)
+                    try:
+                        os.fsync(fd)
+                    finally:
+                        os.close(fd)
             self.samples.pop(meter_id, None)
 
     def evidence(self, meter_id):
         with self.lock:
-            return self.samples.get(meter_id, (None, None))
+            return self._load(meter_id)
 
     def snapshot(self, meter_id):
         with self.lock:
-            raw, stamp = self.samples.get(meter_id, (None, None))
+            raw, stamp = self._load(meter_id)
             passive = dict(self.passive.get(meter_id, {}))
         observed = fresh_projection(raw, stamp, layout_verified=raw is not None, now=self.now())
         result = dict(observed or {})
         result["battery_status"] = battery_status(observed)
+        result.setdefault("meter_installation_status", "unknown")
         result["read_at_utc"] = stamp if observed is not None else None
         result["extension"] = passive
         return result

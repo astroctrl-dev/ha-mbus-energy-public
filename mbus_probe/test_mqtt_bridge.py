@@ -31,9 +31,11 @@ class MqttTests(unittest.TestCase):
     def test_stable_discovery_and_units(self):
         first = discovery_messages("00000000")
         self.assertEqual(first, discovery_messages("00000000"))
-        self.assertEqual(len(first), 23)
-        self.assertEqual(len({json.loads(p)["unique_id"] for _, p, _ in first}), 23)
+        self.assertEqual(len(first), 24)
+        self.assertEqual(len({json.loads(p)["unique_id"] for _, p, _ in first}), 24)
         by_kind = {json.loads(p)["name"]: json.loads(p) for _, p, _ in first}
+        self.assertEqual(by_kind["Meter Installation Status"]["entity_category"], "diagnostic")
+        self.assertTrue(by_kind["Meter Installation Status"]["state_topic"].endswith("/meter_installation_status/state"))
         self.assertEqual(by_kind["Monthly History Failed"]["device_class"], "problem")
         self.assertEqual(by_kind["Monthly History Failed"]["entity_category"], "diagnostic")
         self.assertEqual(len(by_kind["Energy"]["availability"]), 2)
@@ -68,7 +70,7 @@ class MqttTests(unittest.TestCase):
         client = FakeClient()
         values = publish_reading(client, self.decoded, "00000000")
         self.assertEqual(values["energy"], 12345)
-        self.assertEqual(len(client.messages), 47)
+        self.assertEqual(len(client.messages), 48)
         self.assertEqual(client.messages[-1],
                          (availability_topic(device_key("00000000")), "online", 1, True))
         self.assertFalse(any("wrong_installation" in t for t, _, _, _ in client.messages))
@@ -205,7 +207,9 @@ class MqttTests(unittest.TestCase):
     def test_explicit_cleanup_clears_retained_discovery(self):
         client = FakeClient()
         cleanup_discovery(client, "00000000")
-        self.assertEqual(len(client.messages), 89)
+        self.assertEqual(len(client.messages), 90)
+        self.assertTrue(any(t.endswith("_meter_installation_status/config") and p == "" and retain
+                            for t, p, _, retain in client.messages))
         self.assertTrue(all(payload == "" and retain
                             for _, payload, _, retain in client.messages[1:]))
 
@@ -405,3 +409,24 @@ class PeriodGroupTests(unittest.TestCase):
         result=period_archive_attributes({},row,{})["monthly_maxima"]
         self.assertIsNone(result["read_at_utc"])
         self.assertEqual(result["power"]["read_at_utc"],"2026-11-26T10:00:00Z")
+
+class InstallationPublicationTests(unittest.TestCase):
+    def test_unknown_verified_and_expired(self):
+        from datetime import datetime, timezone, timedelta
+        from mqtt_bridge import publish_active_diagnostics
+        now = datetime(2026, 11, 26, 3, 15, tzinfo=timezone.utc)
+        for raw, verified, stamp, expected in ((None, False, None, "unknown"),
+                (bytes.fromhex("04 00 00"), True, now.isoformat(), "warning"),
+                (bytes.fromhex("80 00 00"), True, now.isoformat(), "normal"),
+                (bytes.fromhex("80 00 00"), True, (now-timedelta(hours=27)).isoformat(), "unknown")):
+            client = FakeClient()
+            publish_active_diagnostics(client, "00000000", raw, stamp, layout_verified=verified, now=now)
+            messages = {t: p for t,p,_,_ in client.messages}
+            prefix = "mbus/t230/" + device_key("00000000") + "/meter_installation_status/"
+            self.assertEqual(messages[prefix+"state"], expected)
+            attrs = json.loads(messages[prefix+"attributes"])
+            if expected == "warning":
+                self.assertTrue(attrs["wrong_sensor_installation"])
+                self.assertEqual(attrs["mounting_side"], "return")
+            if expected == "unknown":
+                self.assertNotIn("mounting_side", attrs)

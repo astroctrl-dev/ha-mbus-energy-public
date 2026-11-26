@@ -98,3 +98,10 @@ class PresentationTests(unittest.TestCase):
         self.assertIn("Capture frame 5 (test)", page)
         self.assertIn("'/api/diagnostic_capture'", page)
         self.assertIn("Show capture evidence", page)
+
+    def test_capture_status_and_installation_display(self):
+        page = render_page("en-GB")
+        for text in ("Diagnostic capture:", "Meter Installation Status:",
+                     "captureEvidenceVisible", "state.diagnostic_capture_status"):
+            self.assertIn(text, page)
+        self.assertIn("line.append(capture, status, evidence, output)", page)
