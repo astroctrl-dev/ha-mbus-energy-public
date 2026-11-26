@@ -90,6 +90,8 @@ def load_config(path="/data/options.json"):
         ZoneInfo(config.get("clock_timezone", "Europe/Oslo"))
     except (ZoneInfoNotFoundError, TypeError, ValueError):
         raise ValueError("invalid clock_timezone")
+    if not isinstance(config.get("allow_diagnostic_capture", False), bool):
+        raise ValueError("allow_diagnostic_capture must be boolean")
     if not isinstance(config.get("allow_monthly_history", False), bool):
         raise ValueError("allow_monthly_history must be boolean")
     if not isinstance(config.get("auto_monthly_history", False), bool):
@@ -133,6 +135,17 @@ def publish_normal(config,client,decoded,read_at_utc=None):
     clock_attributes = assess_clock(decoded, read_at_utc, config.get("clock_timezone", "Europe/Oslo"))
     publish_reading(client, decoded, config["meter_id"], read_at_utc=read_at_utc,
                     clock_attributes=clock_attributes)
+    diagnostic = config.get("_diagnostic_runtime")
+    if diagnostic is not None:
+        try:
+            from mbus_records import passive_diagnostics
+            from mqtt_bridge import publish_active_diagnostics
+            diagnostic.observe_normal(config["meter_id"], passive_diagnostics(decoded)["extension_byte"], read_at_utc)
+            raw, stamp = diagnostic.evidence(config["meter_id"])
+            publish_active_diagnostics(client, config["meter_id"], raw, stamp,
+                                       layout_verified=raw is not None, now=diagnostic.now())
+        except (OSError, ValueError, ConnectionError, RuntimeError):
+            LOG.warning("Active diagnostic publication failed; ordinary readings preserved")
     observer = config.get("_clock_observer")
     if observer:
         observer(config["meter_id"], dict(clock_attributes, observed_at_utc=read_at_utc))
@@ -355,6 +368,8 @@ def main():
     history_controller = HistoryController(registry,config,bus_lock,STOP,
         on_complete=lambda meter_id,snapshot: publish_history(client,meter_id,snapshot))
     history_controller.require_startup_normal()
+    from diagnostic_runtime import DiagnosticRuntime
+    config["_diagnostic_runtime"] = DiagnosticRuntime()
     server = serve(registry, config, client, bus_lock, STOP, raw_log=raw_log,
                    history_controller=history_controller)
     maintenance = MaintenanceSchedule(config, server.clock_controller, server.history_controller, STOP)

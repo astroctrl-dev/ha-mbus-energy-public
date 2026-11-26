@@ -10,10 +10,8 @@ class DockerfileTests(unittest.TestCase):
         copy_line = next(line for line in dockerfile.splitlines()
                          if line.startswith("COPY ") and " /opt/" in line)
         copied = set(copy_line.split()[1:-1])
-        # Frame-5 battery acquisition is deliberately not part of the runtime.
-        # Keep this explicit exclusion until the feature is separately approved.
-        excluded = {"battery_diagnostics.py"}
-        self.assertTrue(excluded.isdisjoint(copied))
+        # Pure battery projection is now part of the approved diagnostic scope.
+        excluded = set()
         for name in sorted(p.name for p in folder.glob("*.py")
                            if not p.name.startswith("test_") and p.name not in excluded):
             with self.subTest(module=name):

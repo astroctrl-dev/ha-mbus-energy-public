@@ -23,3 +23,16 @@ def battery_state(evidence, field):
         raise ValueError("unsupported battery field")
     value = (evidence or {}).get(field)
     return "ON" if value is True else "OFF" if value is False else "None"
+
+
+def battery_status(evidence):
+    """Four-state categorical status; never a measured charge percentage."""
+    if not isinstance(evidence, dict):
+        return "unknown"
+    exhausted = evidence.get("battery_exhausted")
+    warning = evidence.get("battery_prewarning")
+    if exhausted is True:
+        return "exhausted"
+    if exhausted is not False or type(warning) is not bool:
+        return "unknown"
+    return "pre-warning" if warning else "normal"

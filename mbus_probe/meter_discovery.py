@@ -3,7 +3,7 @@ from mbus_probe import read_one, validate
 from ha_measurements import select_measurements
 
 
-def scan_bus(port, baud, registry, bus_lock, stop):
+def scan_bus(port, baud, registry, bus_lock, stop, history_blocked=None):
     rows = []
     errors = []
     try:
@@ -14,6 +14,8 @@ def scan_bus(port, baud, registry, bus_lock, stop):
                 registry.scan_progress = address
             try:
                 with bus_lock:
+                    if stop.is_set() or (history_blocked is not None and history_blocked.is_set()):
+                        raise RuntimeError("scan interrupted: normal frame unverified or app stopping")
                     _, frame = read_one(port, baud, address, timeout=2,
                                         first_byte_timeout=0.6)
                 if not frame:

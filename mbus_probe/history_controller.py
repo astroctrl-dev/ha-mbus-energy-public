@@ -141,7 +141,17 @@ class HistoryController:
                 self.state = {"status":"restore_unverified","error":"Startup normal frame initialization pending",
                               "captured_at_utc":None}
 
-    def _initialize_normal(self, selected, reader):
+    @staticmethod
+    def _owned_diagnostic(decoded, address, meter_id, marker):
+        # A durable app-owned selector intent and a fresh identity match are
+        # required. This permits restoration, not decoding any diagnostic bits.
+        return (marker == {"operation":"diagnostic_frame5","meter_id":meter_id,"address":address}
+                and decoded.get("type") == "long" and decoded.get("ci") == 0x72
+                and decoded.get("control") in (8,24) and decoded.get("address") == address
+                and decoded.get("meter_id") == meter_id and decoded.get("manufacturer") == "LUG"
+                and decoded.get("medium_code") == 4)
+
+    def _initialize_normal(self, selected, reader, owned=None):
         # Verify first; only a positively identified historical frame permits
         # a selector write. Keep the startup guard until all meters verify.
         readings = []
@@ -162,21 +172,23 @@ class HistoryController:
                 if (decoded.get("address") != address or decoded.get("control") not in (8,24)
                         or decoded.get("meter_id") != meter_id or decoded.get("manufacturer") != "LUG"):
                     raise normal_error
-                try:
-                    extract_months(frame,meter_id)
-                except ValueError:
+                diagnostic_owned = self._owned_diagnostic(decoded,address,meter_id,owned)
+                if not diagnostic_owned:
                     try:
-                        extract_monthly_set_day(frame,address,meter_id)
+                        extract_months(frame,meter_id)
                     except ValueError:
-                        if not self._confirmed_archive(decoded,address,meter_id):
-                            raise normal_error from None
+                        try:
+                            extract_monthly_set_day(frame,address,meter_id)
+                        except ValueError:
+                            if not self._confirmed_archive(decoded,address,meter_id):
+                                raise normal_error from None
                 if len(selected) != 1:
                     raise ValueError("interface restore requires exactly one selected meter")
                 if self.stop.is_set():
                     raise ValueError("startup interrupted")
                 self.root.mkdir(parents=True,exist_ok=True)
                 with self.marker.open("w") as guard:
-                    json.dump({"operation":"startup_normal"},guard)
+                    json.dump(owned if diagnostic_owned else {"operation":"startup_normal"},guard)
                     guard.flush()
                     os.fsync(guard.fileno())
                 fd = os.open(self.root,os.O_RDONLY)
@@ -217,7 +229,7 @@ class HistoryController:
                 if not selected:
                     return False
                 if self.startup_pending:
-                    self._initialize_normal(selected,reader)
+                    self._initialize_normal(selected,reader,owned)
                     self.marker.unlink(missing_ok=True)
                     self.startup_pending = False
                     self.blocked.clear()
@@ -238,21 +250,23 @@ class HistoryController:
                     except ValueError as normal_error:
                         if decoded.get("address") != address or decoded.get("control") not in (8, 24):
                             raise normal_error
-                        try:
-                            extract_months(frame, meter_id)
-                        except ValueError:
+                        diagnostic_owned = self._owned_diagnostic(decoded,address,meter_id,owned)
+                        if not diagnostic_owned:
                             try:
-                                extract_monthly_set_day(frame, address, meter_id)
+                                extract_months(frame, meter_id)
                             except ValueError:
-                                if not self._confirmed_archive(decoded,address,meter_id):
-                                    raise normal_error from None
+                                try:
+                                    extract_monthly_set_day(frame, address, meter_id)
+                                except ValueError:
+                                    if not self._confirmed_archive(decoded,address,meter_id):
+                                        raise normal_error from None
                         LOG.warning("Recovery confirmed non-normal frame for selected meter")
-                        app_owned = (owned == {"operation":"archive_frame4","meter_id":meter_id,"address":address}
+                        app_owned = diagnostic_owned or (owned == {"operation":"archive_frame4","meter_id":meter_id,"address":address}
                                      and self._confirmed_archive(decoded,address,meter_id))
                         if not app_owned and self.config.get("allow_recovery_interface_reset") is not True:
                             raise ValueError("historical frame confirmed; interface restore disabled")
                         if app_owned:
-                            LOG.info("Restoring interrupted app-owned archive to normal frame")
+                            LOG.info("Restoring interrupted app-owned operation to normal frame")
                         if len(selected) != 1:
                             raise ValueError("interface restore requires exactly one selected meter")
                         if not shared_timing_active() and self.stop.wait(60):
@@ -463,6 +477,59 @@ class HistoryController:
                 self.state = {"status":"running" if _reserved else ("restore_unverified" if self.marker.exists() or self.blocked.is_set() else "failed"),
                               "error":"Archive collection failed; existing history preserved",
                               "captured_at_utc":None}
+            raise
+
+    def capture_diagnostic_dev(self, meter_id, *, approved=False, reader=None):
+        """Bounded evidence collection, never called by automatic polling.
+        Use the common lock and durable restoration marker. No state projection.
+        """
+        from frame5_capture import read_capture, CaptureError
+        if approved is not True or not shared_timing_active():
+            raise ValueError("diagnostic capture requires approval and shared timing")
+        reader = reader or read_capture
+        with self.lock:
+            if self.state["status"] == "running" or self.stop.is_set() or self.blocked.is_set():
+                raise ValueError("bus unavailable")
+            previous_state = dict(self.state)
+            self.state = {"status":"running","error":None,"captured_at_utc":None}
+        try:
+            with self.bus_lock, self.registry.lock:
+                address = self.registry.selected.get(meter_id)
+                if address is None or len(self.registry.selected) != 1 or self.stop.is_set() or self.blocked.is_set() or self.marker.exists() or getattr(self.registry, "scan_status", None) == "running":
+                    raise ValueError("one selected meter and verified normal mode required")
+                self.root.mkdir(parents=True, exist_ok=True)
+                try:
+                    with self.marker.open("w") as guard:
+                        json.dump({"operation":"diagnostic_frame5","meter_id":meter_id,"address":address},guard)
+                        guard.flush()
+                        os.fsync(guard.fileno())
+                    fd = os.open(self.root, os.O_RDONLY)
+                    try:
+                        os.fsync(fd)
+                    finally:
+                        os.close(fd)
+                    result = reader(self.config["serial_port"], int(self.config.get("baud",2400)),
+                                    address, meter_id, approved=True)
+                    self.marker.unlink()
+                except CaptureError:
+                    try:
+                        self.marker.unlink()
+                    except OSError:
+                        self.blocked.set()
+                        raise
+                    raise
+                except Exception:
+                    self.blocked.set()
+                    raise
+            with self.lock:
+                self.state = previous_state
+            return result
+        except Exception:
+            if self.marker.exists():
+                self.blocked.set()
+            with self.lock:
+                self.state = ({"status":"restore_unverified","error":"Diagnostic capture failed; normal frame unverified",
+                               "captured_at_utc":None} if self.blocked.is_set() else previous_state)
             raise
 
     def start(self, meter_id, *, replace=False, settings_only=False, manual=False):

@@ -10,6 +10,9 @@ from datetime import datetime, timezone
 from ha_measurements import REQUIRED_SENSORS, SENSORS, select_measurements
 from temperature_units import DIFFERENCE
 from mbus_records import passive_diagnostics
+from active_diagnostics import extension_projection
+from diagnostic_runtime import fresh_projection
+from battery_diagnostics import battery_status
 from maxima import project_maxima, FIELDS
 from archive_view import archive_attributes, period_archive_attributes
 
@@ -83,18 +86,55 @@ def discovery_messages(meter_id):
         messages.append((topic, json.dumps(payload), True))
     for kind, label in (("dst_transition_failed", "DST Transition Failed"),
                         ("dst_clock_override", "DST Clock Override"),
-                        ("monthly_history_failed", "Monthly History Failed")):
+                        ("monthly_history_failed", "Monthly History Failed"),
+                        ("extension_byte_warning", "Extension Byte Warning"),
+                        ("active_meter_faults", "Active Meter Faults"),
+                        ("flow_warning", "Flow Warning")):
         payload = {"name": label, "unique_id": f"mbus_t230_{key}_{kind}",
                    "device": device, "state_topic": f"mbus/t230/{key}/{kind}/state",
                    "json_attributes_topic": f"mbus/t230/{key}/{kind}/attributes",
                    "payload_on": "ON", "payload_off": "OFF",
                    "availability": [{"topic": availability}, {"topic": BRIDGE_AVAILABILITY}],
                    "availability_mode": "all", "entity_category": "diagnostic"}
-        if kind in ("dst_transition_failed", "monthly_history_failed"):
+        if kind in ("dst_transition_failed", "monthly_history_failed", "extension_byte_warning",
+                    "active_meter_faults", "flow_warning"):
             payload["device_class"] = "problem"
         messages.append((f"homeassistant/binary_sensor/mbus_t230_{key}_{kind}/config",
                          json.dumps(payload), True))
+    messages.append((f"homeassistant/sensor/mbus_t230_{key}_battery_status/config",
+        json.dumps({"name": "Battery Status", "unique_id": f"mbus_t230_{key}_battery_status",
+                    "device": device, "state_topic": f"mbus/t230/{key}/battery_status/state",
+                    "json_attributes_topic": f"mbus/t230/{key}/battery_status/attributes",
+                    "availability": [{"topic": availability}, {"topic": BRIDGE_AVAILABILITY}],
+                    "availability_mode": "all", "entity_category": "diagnostic",
+                    "icon": "mdi:battery-unknown"}), True))
     return messages
+
+
+def publish_active_diagnostics(client, meter_id, extension=None, read_at_utc=None, *,
+                               layout_verified=False, now=None):
+    """Publish verified, fresh sampled state; otherwise explicitly unknown.
+    No retained states. Caller owns physical evidence and layout verification.
+    """
+    observed = fresh_projection(extension, read_at_utc, layout_verified=layout_verified, now=now)
+    key = device_key(meter_id)
+    common = {"read_at_utc": read_at_utc if observed is not None else None,
+              "source": "T230 frame 5 ABCDEF", "layout_verified": observed is not None}
+    values = observed or {}
+    for kind, value, attrs in (
+        ("active_meter_faults", values.get("active_meter_faults"),
+         {"fault_messages": values.get("fault_messages")}),
+        ("flow_warning", values.get("flow_warning"), values.get("flow_attributes") or {}),
+        ("battery_status", battery_status(observed),
+         {"battery_prewarning": values.get("battery_prewarning"),
+          "battery_exhausted": values.get("battery_exhausted")})):
+        state = value if kind == "battery_status" else (
+            "ON" if value is True else "OFF" if value is False else "None")
+        for suffix, payload in (("attributes", json.dumps({**common, **attrs})), ("state", state)):
+            result = client.publish(f"mbus/t230/{key}/{kind}/{suffix}", payload, qos=1, retain=False)
+            if result.rc:
+                raise ConnectionError("MQTT active diagnostic publish failed")
+            result.wait_for_publish(timeout=5)
 
 
 def publish_dst_diagnostics(client, meter_id, state):
@@ -318,7 +358,13 @@ def publish_reading(client, decoded, meter_id, read_at_utc=None, clock_attribute
         if result.rc:
             raise ConnectionError("MQTT maximum attributes publish failed")
         result.wait_for_publish(timeout=5)
+    extension = extension_projection(diagnostics["extension_byte"])
+    extension["read_at_utc"] = read_at_utc
+    extension["extension_byte"] = diagnostics["extension_byte"]
+    warning = extension["extension_byte_warning"]
     for suffix, payload in (
+            ("extension_byte_warning/attributes", json.dumps(extension)),
+            ("extension_byte_warning/state", "None" if warning is None else "ON" if warning else "OFF"),
             ("meter_status/attributes", json.dumps({
                 "extension_byte": diagnostics["extension_byte"], "read_at_utc": read_at_utc})),
             ("firmware_version/state", diagnostics["firmware_version"] or "unknown")):

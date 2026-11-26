@@ -1,4 +1,7 @@
 configuration:
+  allow_diagnostic_capture:
+    name: "Diagnose-Testabfrage erlauben"
+    description: "Manuell bestätigte Abfrage von Rahmen 5 erlauben. Keine automatische Abfrage."
   log_measurement_data:
     name: "Messdaten protokollieren"
     description: "Dekodierte Messwerte für Excel speichern. Vorhandene Dateien bleiben erhalten."

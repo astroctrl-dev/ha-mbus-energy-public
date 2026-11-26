@@ -254,5 +254,10 @@ def decode_frame5_flags(extension):
         "battery_exhausted": bool(ef & 0x10),
         "battery_prewarning": bool(ab & 0x02),
         "flow_prewarning": bool(ab & 0x01),
+        "installation_in_flow": bool(ab & 0x80),
+        "negative_flow": bool(ab & 0x20),
+        "negative_temperature_difference": bool(ab & 0x10),
+        "wrong_volume_installation": bool(ab & 0x08),
+        "wrong_sensor_installation": bool(ab & 0x04),
         "battery_status": "exhausted" if ef & 0x10 else "warning" if ab & 2 else "no_warning_reported",
     }

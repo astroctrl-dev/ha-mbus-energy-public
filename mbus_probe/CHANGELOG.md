@@ -1,3 +1,18 @@
+## v2.9.2-beta.1
+
+- Active meter fault diagnostics (F0–F9)
+- Flow warning diagnostics
+- Extension byte diagnostics
+- Four-state battery indicator
+- MQTT and Web UI diagnostics
+- Manual frame-5 test capture (opt-in)
+- Safe normal-frame recovery
+
+**Limitations**
+- Physical frame-5 validation pending
+- Automatic diagnostic acquisition disabled
+- Active frame-5 states remain unknown
+
 ## v2.9.1 (stable)
 
 - Retry recoverable extended archive errors up to three times per position, and continue after verified normal-mode restoration.

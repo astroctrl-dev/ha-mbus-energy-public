@@ -20,10 +20,10 @@ from zoneinfo import ZoneInfo
 
 
 PAGE = r"""<!doctype html><html lang="no"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>M-Bus målere</title>
-<style>html,body{margin:0;min-height:100%;background:#f7f9fb;color:#17212b;font:16px/1.5 system-ui,-apple-system,sans-serif}main{max-width:720px;margin:0 auto;padding:20px 16px 40px}h1{font-size:1.5rem;line-height:1.2;margin:0 0 8px}h2{font-size:1.15rem;margin:24px 0 8px}p{margin:8px 0}button{min-height:44px;max-width:100%;border:1px solid #8a9aaa;border-radius:8px;background:#e8f1fa;color:#152b3e;padding:8px 14px;font:inherit;margin:4px 4px 4px 0}button:disabled{opacity:.55}button:focus-visible{outline:3px solid #1266ab}.table-wrap{overflow-x:auto;background:#fff;border:1px solid #d0d9e1;border-radius:8px}table{border-collapse:collapse;width:100%;font:inherit}th,td{text-align:left;padding:8px;border-bottom:1px solid #d0d9e1;white-space:nowrap}#status{background:#fff;border:1px solid #d0d9e1;border-radius:8px;padding:12px}.meter{background:#fff;border:1px solid #d0d9e1;border-radius:8px;padding:12px;margin:8px 0;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;overflow-wrap:anywhere}details{margin:12px 0}summary{cursor:pointer;font-weight:600;padding:8px 0}#error{color:#a12020;overflow-wrap:anywhere}</style><main><h1>M-Bus målere</h1><p>Søk leser primæradressene 0–250. Målere med delt adresse kan ikke alltid skilles.</p>
+<style>html,body{margin:0;min-height:100%;background:#f7f9fb;color:#17212b;font:16px/1.5 system-ui,-apple-system,sans-serif}main{max-width:720px;margin:0 auto;padding:20px 16px 40px}h1{font-size:1.5rem;line-height:1.2;margin:0 0 8px}h2{font-size:1.15rem;margin:24px 0 8px}p{margin:8px 0}button{min-height:44px;max-width:100%;border:1px solid #8a9aaa;border-radius:8px;background:#e8f1fa;color:#152b3e;padding:8px 14px;font:inherit;margin:4px 4px 4px 0}button:disabled{opacity:.55}button:focus-visible{outline:3px solid #1266ab}.table-wrap{overflow-x:auto;background:#fff;border:1px solid #d0d9e1;border-radius:8px}table{border-collapse:collapse;width:100%;font:inherit}th,td{text-align:left;padding:8px;border-bottom:1px solid #d0d9e1;white-space:nowrap}#status{background:#fff;border:1px solid #d0d9e1;border-radius:8px;padding:12px}.meter{background:#fff;border:1px solid #d0d9e1;border-radius:8px;padding:12px;margin:8px 0;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;overflow-wrap:anywhere}details{margin:12px 0}summary{cursor:pointer;font-weight:600;padding:8px 0}#error{color:#a12020;overflow-wrap:anywhere}.active-diagnostics{width:100%;border-top:1px solid #d0d9e1;padding-top:8px}.battery-line{display:flex;align-items:center;gap:10px}.battery-symbol{width:48px;height:23px;position:relative;border:2px solid currentColor;border-radius:4px;box-sizing:border-box;display:inline-flex;align-items:center;padding:2px}.battery-symbol:after{content:'';position:absolute;right:-6px;top:5px;width:4px;height:9px;background:currentColor;border-radius:1px}.battery-fill{height:100%;border-radius:1px;background:currentColor}.battery-normal{color:#207b43}.battery-normal .battery-fill{width:100%}.battery-pre-warning{color:#946500}.battery-pre-warning .battery-fill{width:30%;background:#d5a000}.battery-exhausted{color:#b22222}.battery-unknown{color:#687582}.battery-exhausted .battery-fill,.battery-unknown .battery-fill{display:none}.battery-mark{font-weight:bold;width:100%;text-align:center;line-height:1}</style><main><h1>M-Bus målere</h1><p>Søk leser primæradressene 0–250. Målere med delt adresse kan ikke alltid skilles.</p>
 <p>Initial readings are normally available within about 60 seconds. If the meter is in a confirmed historical telegram mode, automatic restoration of normal telegram mode may take about three minutes in total. Communication errors may extend this time. The minimum interval between commands is 60 seconds.</p><button id="scan">Søk etter målere</button><button id="auto">Velg eneste ledige automatisk</button>
 <h2>Tilgjengelige målere</h2><div id="available"></div>
-<h2>Etablerte målere</h2><div id="selected"></div>
+<h2>Etablerte målere</h2><div id="selected"></div><pre id="diagnostic-evidence" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre>
 <h2>Klokke</h2><p>Synkronisering bruker systemtid og valgt tidssone i Configuration. Manuell synkronisering krever bekreftelse; automatisk kontroll starter etter første gyldige måling ved oppstart eller nytt målervalg.</p><p id="clock-status"></p><h2>Analyse</h2><p>Last ned validerte normalavlesninger og lagret månedshistorikk som Excel-fil. Nedlasting leser lagrede data og sender ingen kommando til måleren. Historikk hentes separat med knappen ved den valgte måleren.</p><p>Measurement data logging is controlled separately in Configuration. Disabling capture keeps existing files and history.</p><button id="export">Last ned analyse (.xlsx)</button>
 <h2>Lagret månedshistorikk</h2><p>First installation: leave all optional switches off and verify ordinary live measurements before enabling additional functions. Initial retrieval reads frames 2 and 3. Subsequent manual retrieval reads missing extended months (frame 4); allow about four minutes per month. The table shows progress for the current job. Regular polling pauses; live values may be stale or temporarily unavailable. Clock synchronization and scanning also respect the interval. Downloads use saved data and do not query the meter.</p><p>Positions indicate the order in the meter archive. A dash means no retrieval has been started in this session. Saved energy values remain visible while extended data is being read.</p><div id="history"></div><h2>Raw telegram diagnostics</h2><p>Local capture may contain meter identifiers and consumption. Enable raw capture in Configuration; restart the app to apply. No extra bus requests.</p><p id="raw-status"></p><button id="raw-download">Download raw text (.txt)</button><p id="status"></p><p id="error" role="alert"></p>
 </main><script>
@@ -99,6 +99,62 @@ async function call(path, body) {
 function button(label, handler) {
   const b = document.createElement('button'); b.textContent = label; b.onclick = handler; return b;
 }
+function renderActiveDiagnostics(data) {
+  const section = document.createElement('section');
+  section.className = 'active-diagnostics';
+  const title = document.createElement('strong');
+  title.textContent = 'Active diagnostics';
+  section.append(title);
+  const states = ['normal', 'pre-warning', 'exhausted', 'unknown'];
+  const battery = states.includes(data.battery_status) ? data.battery_status : 'unknown';
+  const labels = {'normal':'Normal','pre-warning':'Pre-warning','exhausted':'Exhausted','unknown':'Unknown'};
+  const line = document.createElement('p');
+  line.className = 'battery-line';
+  const icon = document.createElement('span');
+  icon.className = 'battery-symbol battery-' + battery;
+  icon.setAttribute('aria-hidden','true');
+  const fill = document.createElement('span');
+  fill.className = 'battery-fill';
+  icon.append(fill);
+  if (battery === 'exhausted' || battery === 'unknown') {
+    const mark = document.createElement('span');
+    mark.className = 'battery-mark';
+    mark.textContent = battery === 'exhausted' ? '×' : '?';
+    icon.append(mark);
+  }
+  line.append(icon, document.createTextNode('Battery Status: ' + labels[battery]));
+  section.append(line);
+  const flag = v => v === true ? 'Active' : v === false ? 'Inactive' : 'Unknown';
+  const faults = document.createElement('p');
+  faults.textContent = 'Active Meter Faults: ' + flag(data.active_meter_faults);
+  section.append(faults);
+  if (Array.isArray(data.fault_messages) && data.fault_messages.length) {
+    const list = document.createElement('ul');
+    for (const message of data.fault_messages) {
+      const item = document.createElement('li');
+      item.textContent = message;
+      list.append(item);
+    }
+    section.append(list);
+  }
+  const flow = document.createElement('p');
+  flow.textContent = 'Flow Warning: ' + flag(data.flow_warning);
+  section.append(flow);
+  for (const [key, value] of Object.entries(data.flow_attributes || {})) {
+    const detail = document.createElement('p');
+    detail.textContent = key.replaceAll('_', ' ') + ': ' + flag(value);
+    section.append(detail);
+  }
+  const ext = data.extension || {};
+  const extension = document.createElement('p');
+  extension.textContent = 'Extension Byte Warning: ' + flag(ext.extension_byte_warning) +
+    ' (' + (ext.extension_byte || 'Unknown') + ')';
+  section.append(extension);
+  const stamp = document.createElement('p');
+  stamp.textContent = 'Last verified diagnostics: ' + (data.read_at_utc || 'Unknown');
+  section.append(stamp);
+  return section;
+}
 async function refresh() {
   if (refreshing) return;
   refreshing = true;
@@ -122,10 +178,10 @@ async function refresh() {
       lastHistoryCapture = state.history.captured_at_utc;
       lastArchiveRevision = state.history.archive_revision;
     }
-    const busy = historySubmitting || state.history.status === 'running' || state.clock.status === 'running' || state.scan_status === 'running';
+    const busy = state.diagnostic_capture_running || historySubmitting || state.history.status === 'running' || state.clock.status === 'running' || state.scan_status === 'running';
     document.getElementById('scan').disabled = busy;
     document.getElementById('auto').disabled = busy || state.scan_status !== 'completed' || state.scan_errors.length > 0 || state.available.filter(m => m.supported).length !== 1;
-    const lists = JSON.stringify([busy, state.available, state.selected, state.history_enabled, state.history.status, state.history.manual_meter, state.history.stopping, state.clock_enabled, state.auto_clock_sync, state.clock.status, state.clock_target, state.migrations, state.dst_diagnostics, state.monthly_alarms]);
+    const lists = JSON.stringify([busy, state.available, state.selected, state.history_enabled, state.history.status, state.history.manual_meter, state.history.stopping, state.clock_enabled, state.auto_clock_sync, state.clock.status, state.clock_target, state.migrations, state.dst_diagnostics, state.monthly_alarms, state.active_diagnostics, state.diagnostic_capture_enabled]);
     if (lists !== lastLists) {
       lastLists = lists;
     for (const name of ['available', 'selected']) {
@@ -135,6 +191,24 @@ async function refresh() {
         line.textContent = `ID ${item.meter_id}, adresse ${item.address}` +
           (item.manufacturer ? `, ${item.manufacturer}` : '');
         if (name === 'selected') {
+          line.append(renderActiveDiagnostics((state.active_diagnostics || {})[item.meter_id] || {}));
+          if (state.diagnostic_capture_enabled) {
+            const capture = button('Capture frame 5 (test)', async () => {
+              if (!confirm('Read one diagnostic telegram and restore normal polling? This may take several minutes.')) return;
+              capture.disabled = true;
+              try { await call('/api/diagnostic_capture', {meter_id:item.meter_id, confirm:true}); }
+              catch (e) { document.getElementById('error').textContent=e.message; }
+              finally { lastLists=''; await refresh(); }
+            });
+            capture.disabled = busy;
+            const evidence = button('Show capture evidence', async () => {
+              try {
+                const result = await call('/api/diagnostic_capture');
+                document.getElementById('diagnostic-evidence').textContent = JSON.stringify(result, null, 2);
+              } catch(e) { document.getElementById('error').textContent=e.message; }
+            });
+            line.append(capture, evidence);
+          }
           const dstState = (state.dst_diagnostics || {})[item.meter_id] || {};
           const diagnostic = document.createElement('p');
           const flag = value => localText(value === true ? 'DST_ACTIVE' : value === false ? 'DST_INACTIVE' : 'DST_UNKNOWN');
@@ -276,6 +350,24 @@ def serve(registry, config, client, bus_lock, stop, port=8099, history_controlle
         on_complete=lambda meter_id, snapshot: publish_history(client, meter_id, snapshot))
     clock_controller = clock_controller or ClockController(registry, config, bus_lock, stop,
                                                            history_blocked=history_controller.blocked)
+    capture_lock = threading.Lock()
+    capture_state = {"status": "not_started"}
+
+    def diagnostic_capture(meter_id):
+        try:
+            from frame5_capture import redact_capture
+            result = history_controller.capture_diagnostic_dev(meter_id, approved=True)
+            safe = redact_capture(result)
+            with capture_lock:
+                capture_state.update(status="normal_layout_detected" if safe.get("normal_layout_detected") else "complete", evidence=safe)
+        except (ValueError, OSError, RuntimeError):
+            with capture_lock:
+                capture_state.update(status="failed", evidence=None)
+
+    def capture_running():
+        with capture_lock:
+            return capture_state["status"] == "running"
+
     def dst_diagnostics():
         result = {}
         for row in registry.snapshot()["selected"]:
@@ -314,12 +406,20 @@ def serve(registry, config, client, bus_lock, stop, port=8099, history_controlle
                                  "migrations": {r["meter_id"]: history_controller.migration_status(r["meter_id"]) for r in registry.snapshot()["selected"]},
                                  "raw_log": raw_log.status() if raw_log else None,
                                  "dst_diagnostics": dst_diagnostics(),
+                                 "diagnostic_capture_enabled": config.get("allow_diagnostic_capture") is True,
+                                 "diagnostic_capture_running": capture_running(),
+                                 "active_diagnostics": {r["meter_id"]: config["_diagnostic_runtime"].snapshot(r["meter_id"])
+                                                        if config.get("_diagnostic_runtime") else {"battery_status":"unknown"}
+                                                        for r in registry.snapshot()["selected"]},
                                  "monthly_alarms": {r["meter_id"]: monthly_alarm(r["meter_id"]) for r in registry.snapshot()["selected"]},
                                  "history_enabled": config.get("allow_monthly_history", False),
                                  "clock": clock_controller.snapshot(),
                                  "clock_enabled": config.get("allow_clock_sync", False),
                                  "auto_clock_sync": config.get("auto_clock_sync", False),
                                  "clock_target": configured_local(datetime.now(ZoneInfo("UTC")), config.get("clock_timezone", "Europe/Oslo")).isoformat(timespec="minutes")})
+            elif self.path.rstrip("/").endswith("/api/diagnostic_capture"):
+                with capture_lock:
+                    self._send(200, dict(capture_state))
             elif self.path.rstrip("/").endswith("/api/history"):
                 try:
                     entries = [{"alias": alias, "snapshot": snapshot,
@@ -375,7 +475,7 @@ def serve(registry, config, client, bus_lock, stop, port=8099, history_controlle
                 self._send(403, {"error": "ingress required"})
                 return
             route = self.path.rsplit("/", 2)[-1]
-            if route not in ("scan", "select", "auto", "remove", "history", "clock", "migrate", "ack_history", "stop_history"):
+            if route not in ("scan", "select", "auto", "remove", "history", "clock", "migrate", "ack_history", "stop_history", "diagnostic_capture"):
                 self._send(404, {"error": "not found"})
                 return
             try:
@@ -383,7 +483,11 @@ def serve(registry, config, client, bus_lock, stop, port=8099, history_controlle
                 if not 0 <= length <= 256:
                     raise ValueError("invalid request length")
                 data = json.loads(self.rfile.read(length) or b"{}")
+                if not isinstance(data, dict):
+                    raise ValueError("request must be a JSON object")
                 meter_id = data.get("meter_id")
+                if meter_id is not None and not isinstance(meter_id, str):
+                    raise ValueError("meter_id must be text")
                 if route == "stop_history":
                     history_controller.request_stop(meter_id)
                     self._send(200, registry.snapshot())
@@ -402,6 +506,24 @@ def serve(registry, config, client, bus_lock, stop, port=8099, history_controlle
                     raise ValueError("Normal telegram not yet verified")
                 if history_controller.snapshot()["status"] == "running":
                     raise ValueError("History retrieval already running")
+                with capture_lock:
+                    if capture_state["status"] == "running":
+                        raise ValueError("diagnostic capture already running")
+                if route == "diagnostic_capture":
+                    if config.get("allow_diagnostic_capture") is not True or data.get("confirm") is not True:
+                        raise ValueError("diagnostic capture requires explicit permission and confirmation")
+                    if stop.is_set() or clock_controller.snapshot().get("status") == "running":
+                        raise ValueError("bus unavailable")
+                    with registry.lock:
+                        if len(registry.selected) != 1 or meter_id not in registry.selected or registry.scan_status == "running":
+                            raise ValueError("one selected meter and idle scanner required")
+                    with capture_lock:
+                        if capture_state["status"] == "running":
+                            raise ValueError("diagnostic capture already running")
+                        capture_state.update(status="running", evidence=None)
+                    threading.Thread(target=diagnostic_capture, args=(meter_id,), daemon=True).start()
+                    self._send(202, {"status": "running"})
+                    return
                 if route == "scan":
                     with registry.lock:
                         if registry.scan_status == "running":
@@ -411,7 +533,7 @@ def serve(registry, config, client, bus_lock, stop, port=8099, history_controlle
                         registry.scan_errors = []
                         registry.found = {}
                     threading.Thread(target=scan_bus, args=(config["serial_port"],
-                                     int(config.get("baud", 2400)), registry, bus_lock, stop),
+                                     int(config.get("baud", 2400)), registry, bus_lock, stop, history_controller.blocked),
                                      daemon=True).start()
                 elif route == "migrate":
                     history_controller.migrate(meter_id)

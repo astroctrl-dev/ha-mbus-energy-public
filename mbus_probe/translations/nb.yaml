@@ -1,4 +1,7 @@
 configuration:
+  allow_diagnostic_capture:
+    name: "Tillat diagnostisk testavlesning"
+    description: "Tillat manuelt bekreftet testavlesning av ramme 5. Ingen automatisk avlesning."
   log_measurement_data:
     name: "Logg måledata"
     description: "Lagre dekodede normalavlesninger for Excel. Eksisterende filer beholdes."

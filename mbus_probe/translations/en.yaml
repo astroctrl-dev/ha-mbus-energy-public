@@ -1,4 +1,7 @@
 configuration:
+  allow_diagnostic_capture:
+    name: "Allow diagnostic test capture"
+    description: "Permit one manually confirmed frame-5 evidence capture. No automatic reading or active status decoding."
   log_measurement_data:
     name: "Log measurement data"
     description: "Save decoded normal readings for Excel export; existing files are retained."

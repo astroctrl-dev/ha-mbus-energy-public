@@ -82,3 +82,19 @@ class PresentationTests(unittest.TestCase):
         self.assertIn('language="en-GB"', source)
         self.assertNotIn("Accept-Language", source)
         self.assertIn('M-Bus energy meters', render_page("en-GB"))
+
+    def test_active_diagnostic_battery_display(self):
+        page = render_page("en-GB")
+        for state in ("normal", "pre-warning", "exhausted", "unknown"):
+            self.assertIn(".battery-" + state, page)
+        self.assertIn("Battery Status:", page)
+        self.assertIn("renderActiveDiagnostics", page)
+        self.assertIn("Last verified diagnostics:", page)
+        self.assertIn("item.textContent = message", page)
+
+    def test_capture_controls_are_opt_in(self):
+        page = render_page("en-GB")
+        self.assertIn("state.diagnostic_capture_enabled", page)
+        self.assertIn("Capture frame 5 (test)", page)
+        self.assertIn("'/api/diagnostic_capture'", page)
+        self.assertIn("Show capture evidence", page)

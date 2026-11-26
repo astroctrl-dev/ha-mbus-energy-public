@@ -22,3 +22,16 @@ class BatteryTests(unittest.TestCase):
         self.assertEqual(battery_state(None,"battery_prewarning"),"None")
         self.assertEqual(battery_state({"battery_prewarning":False},"battery_prewarning"),"OFF")
         self.assertEqual(battery_state({"battery_prewarning":True},"battery_prewarning"),"ON")
+
+    def test_combined_status(self):
+        from battery_diagnostics import battery_status
+        for warning, exhausted, expected in (
+            (False, False, "normal"), (True, False, "pre-warning"),
+            (False, True, "exhausted"), (True, True, "exhausted"),
+            (None, False, "unknown"), (True, None, "unknown"),
+            (None, True, "exhausted"), (0, False, "unknown"),
+        ):
+            self.assertEqual(battery_status({"battery_prewarning": warning,
+                "battery_exhausted": exhausted}), expected)
+        self.assertEqual(battery_status(None), "unknown")
+        self.assertEqual(battery_status({}), "unknown")
