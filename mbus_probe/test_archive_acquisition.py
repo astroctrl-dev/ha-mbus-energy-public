@@ -22,6 +22,24 @@ class AcquisitionTests(unittest.TestCase):
                 collect_one({},1,"00000000",1,exchange,approved=True)
             verify.assert_called_once()
         self.assertEqual(len(calls),3)
+    def test_normal_verification_timeout_retries_without_selecting_again(self):
+        from monthly_diagnostic import restore_normal_frame
+        responses = iter([b"\xe5", b"archive", b"\xe5", b"", b"normal"])
+        calls = []
+        def exchange(tx):
+            calls.append(tx)
+            return next(responses)
+        header=dict(type="long",ci=0x72,control=8,address=1,meter_id="00000000",
+                    manufacturer="LUG",medium_code=4,status=0)
+        with patch("archive_acquisition.validate",return_value=header), \
+             patch("archive_acquisition.decode_month",return_value={}), \
+             patch("archive_acquisition.verify_normal_frame") as verify, \
+             patch("archive_acquisition.supplement_month",return_value={"saved":1}):
+            self.assertEqual(collect_one({},1,"00000000",1,exchange,approved=True),{"saved":1})
+            verify.assert_called_once_with(b"normal",1,"00000000")
+        self.assertEqual(calls.count(restore_normal_frame(1)),1)
+        self.assertEqual(len(calls),5)
+
     def test_restore_failure_overrides_selection_failure(self):
         with self.assertRaises(RestorationError):
             collect_one({},1,"00000000",1,lambda _:b"",approved=True)

@@ -41,6 +41,17 @@ class PresentationTests(unittest.TestCase):
             self.assertIn("confirm:true", page)
             self.assertIn("state.history.status === 'running'", page)
 
+    def test_history_controls_and_section_order(self):
+        page = render_page("en-GB")
+        self.assertIn("'/api/stop_history'", page)
+        self.assertIn('"/api/ack_history"', page)
+        self.assertIn("state.history.manual_meter === item.meter_id", page)
+        self.assertIn("details.dataset.meter = entry.alias", page)
+        self.assertLess(page.index('id="available"'), page.index('id="selected"'))
+        self.assertLess(page.index('id="selected"'), page.index('id="clock-status"'))
+        self.assertLess(page.index('id="clock-status"'), page.index('id="history"'))
+        self.assertLess(page.index('id="history"'), page.index('id="raw-status"'))
+
     def test_dynamic_translation_does_not_change_control_status(self):
         for translations in STATUS_TEXT.values():
             self.assertEqual(set(translations), set(LANGUAGES))
@@ -50,7 +61,7 @@ class PresentationTests(unittest.TestCase):
             self.assertIn("localText(state.history.status)", page)
             self.assertIn("localText(state.clock.status)", page)
             self.assertIn("state.scan_status === 'running'", page)
-            self.assertIn("state.history.status === 'complete'", page)
+            self.assertIn("state.history.captured_at_utc !== lastHistoryCapture", page)
 
     def test_configuration_translation_keys_match_schema(self):
         from pathlib import Path

@@ -13,6 +13,7 @@ import threading
 import time
 from datetime import datetime, timezone, timedelta
 from history_controller import history_file
+from monthly_retry import MonthlyRetry
 from zoneinfo import ZoneInfo
 from dst_transition import latest_transition, evaluate_transition, TransitionStore
 
@@ -28,6 +29,11 @@ class MaintenanceSchedule:
         self.completed = set()
         self.root = Path(root)
         self.path = self.root / 'maintenance-calendar.json'
+        self.monthly_retry = MonthlyRetry(self.root)
+        try:
+            self.monthly_retry.reconcile_interrupted()
+        except (OSError, ValueError, TypeError, AttributeError):
+            LOG.error("Monthly retry ledger recovery failed; automatic history deferred")
         try:
             saved = json.loads(self.path.read_text(encoding='utf-8'))
             self.calendar = {k: v for k, v in saved.items() if isinstance(k, str) and isinstance(v, str)}
@@ -81,6 +87,14 @@ class MaintenanceSchedule:
         except (OSError, ValueError, KeyError, TypeError, AttributeError):
             return False
 
+    @staticmethod
+    def storage_target(local, day, hour, minute):
+        target = local.replace(day=day, hour=hour, minute=minute, second=0, microsecond=0)
+        if local < target + timedelta(days=1):
+            previous = local.replace(day=1) - timedelta(days=1)
+            target = previous.replace(day=day, hour=hour, minute=minute, second=0, microsecond=0)
+        return target
+
     def history_due(self, meter_id, local):
         """Use saved archive and configuration, never process uptime as freshness."""
         try:
@@ -104,12 +118,24 @@ class MaintenanceSchedule:
             if self.configuration_due(meter_id, local):
                 return False
             # Collect after the configured storage day, not during rollover.
-            target = local.replace(day=day, hour=hour, minute=minute, second=0, microsecond=0)
-            if local < target + timedelta(days=1):
-                return False
+            target = self.storage_target(local, day, hour, minute)
             return (stamp.year, stamp.month) != (target.year, target.month)
         except (OSError, ValueError, KeyError, TypeError, AttributeError):
             return True
+
+    def history_retry_window(self, meter_id, local):
+        # Apply the bounded calendar window to established monthly archives.
+        # Initial acquisition remains a distinct workflow.
+        try:
+            snapshot = json.loads(history_file(self.root, meter_id).read_text(encoding="utf-8"))
+            if snapshot.get("schema_version") != 3:
+                return None
+            setting = snapshot["monthly_set_day"]
+            target = self.storage_target(local, setting["day"], setting["hour"], setting["minute"])
+            first = (target + timedelta(days=1)).date()
+            return self._calendar_key("history", meter_id) + ":" + target.strftime("%Y-%m"), first
+        except (OSError, ValueError, KeyError, TypeError, AttributeError):
+            return None
 
     def due(self, meter_id, local):
         date = local.date().isoformat()
@@ -130,7 +156,12 @@ class MaintenanceSchedule:
                 return
             key = ("history", meter_id, date)
             if self.history_due(meter_id, local) and not self._done(key):
-                yield key
+                window = self.history_retry_window(meter_id, local)
+                try:
+                    if window is None or self.monthly_retry.eligible(window[0], local.date(), window[1]):
+                        yield key
+                except (OSError, ValueError, TypeError, AttributeError):
+                    LOG.error("Monthly retry ledger invalid; automatic history deferred")
 
     def _transition_job(self, meter_id, local):
         """Consume at most one observed seasonal transition, before any write."""
@@ -231,9 +262,22 @@ class MaintenanceSchedule:
         controller = self.clock if kind == "clock" else self.history
         with self.lock:
             self.attempted[key] = self.monotonic()
+        window = None
+        attempt_day = None
+        reserved = False
+        success = False
+        reason = "not_verified"
         try:
             if self.stop.is_set():
                 return
+            if kind == "history":
+                local = self.now().astimezone(self.zone)
+                window = self.history_retry_window(meter_id, local)
+                attempt_day = local.date()
+                if window:
+                    reserved = self.monthly_retry.reserve(window[0], attempt_day, window[1])
+                    if not reserved:
+                        return
             if kind == "clock":
                 controller.start(meter_id, auto=True)
             elif kind == "configuration":
@@ -247,6 +291,8 @@ class MaintenanceSchedule:
             if controller.worker is not worker:
                 return
             status = controller.snapshot()["status"]
+            success = status == "complete"
+            reason = status
             if status in (("verified", "manual_required") if kind == "clock" else ("complete",)):
                 with self.lock:
                     self._record(key)
@@ -256,4 +302,11 @@ class MaintenanceSchedule:
                         self._record((kind, meter_id, local.date().isoformat()))
                 LOG.info("Automatic %s job completed: %s", kind, status)
         except (ValueError, RuntimeError, OSError) as exc:
-            LOG.warning("Automatic %s job deferred: %s", kind, type(exc).__name__)
+            reason = type(exc).__name__
+            LOG.warning("Automatic %s job deferred: %s", kind, reason)
+        finally:
+            if reserved and attempt_day is not None:
+                try:
+                    self.monthly_retry.finish(window[0], attempt_day, success, reason)
+                except (OSError, ValueError, KeyError):
+                    LOG.error("Monthly retry result could not be persisted")

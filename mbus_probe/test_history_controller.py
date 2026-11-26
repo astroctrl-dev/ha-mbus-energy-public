@@ -58,6 +58,28 @@ class HistoryControllerTests(unittest.TestCase):
         self.assertIsNone(list(wb["Månedshistorikk"].values)[1][4])
         self.assertEqual(list(wb["Månedsforbruk"].values)[1][3], 10)
 
+    def test_stop_initial_history_before_bus_transaction(self):
+        controller = self.controller(lambda *_: self.fail("reader called after Stop"))
+        with self.bus_lock:
+            controller.start("00000000", manual=True)
+            controller.request_stop("00000000")
+        controller.worker.join(3)
+        self.assertEqual(controller.snapshot()["status"], "aborted")
+        self.assertFalse(controller.marker.exists())
+        self.assertFalse(controller.blocked.is_set())
+
+    def test_stop_initial_history_preserves_valid_result(self):
+        def reader(*args):
+            controller.request_stop("00000000")
+            return months()
+        controller = self.controller(reader)
+        controller.start("00000000", manual=True)
+        controller.worker.join(3)
+        self.assertEqual(controller.snapshot()["status"], "aborted")
+        self.assertEqual(len(load_history(self.root / "analysis", self.registry.snapshot()["selected"])), 1)
+        self.assertFalse(controller.marker.exists())
+        self.assertFalse(controller.blocked.is_set())
+
     def test_restore_failure_sets_guard_before_bus_unlock(self):
         controller = self.controller(lambda *_: (_ for _ in ()).throw(
             RestorationError("uncertain normal frame")))
@@ -218,13 +240,14 @@ class ArchiveControllerTests(unittest.TestCase):
                 self.controller.start_extended_archive("00000000")
         self.assertEqual(self.path.read_bytes(),self.original)
 
-    def test_extended_archive_stops_on_first_rejection(self):
+    def test_extended_archive_retries_three_times_per_position(self):
         from archive_acquisition import ArchiveDataError
         with patch("history_controller.shared_timing_active",return_value=True), \
              patch.object(self.controller,"collect_archive_dev",side_effect=ArchiveDataError("bad")) as read:
             self.controller.start_extended_archive("00000000",confirmed=True)
             self.controller.worker.join(2)
-            read.assert_called_once_with("00000000",1,approved=True,_reserved=True)
+            self.assertEqual([c.args[1] for c in read.call_args_list], [i for i in range(1,25) for _ in range(3)])
+        self.assertEqual(set(self.controller.snapshot()["archive_progress"].values()), {"failed"})
         self.assertEqual(self.controller.snapshot()["status"],"failed")
         self.assertEqual(self.path.read_bytes(),self.original)
 
@@ -243,13 +266,45 @@ class ArchiveControllerTests(unittest.TestCase):
             state=self.controller.snapshot()
             self.assertEqual(state["archive_progress"]["1"],"request")
             self.assertEqual(state["archive_progress"]["2"],"waiting")
-            raise ArchiveDataError("bad")
+            self.controller.blocked.set()
+            raise RestorationError("unverified")
         with patch("history_controller.shared_timing_active",return_value=True), \
              patch.object(self.controller,"collect_archive_dev",side_effect=reject):
             self.controller.start_extended_archive("00000000",confirmed=True)
             self.controller.worker.join(2)
-        self.assertEqual(self.controller.snapshot()["archive_progress"]["1"],"failed")
-        self.assertEqual(self.controller.snapshot()["archive_progress"]["2"],"waiting")
+        self.assertEqual(self.controller.snapshot()["archive_progress"]["1"],"aborted")
+        self.assertEqual(self.controller.snapshot()["archive_progress"]["2"],"aborted")
+        self.assertEqual(self.controller.snapshot()["status"],"restore_unverified")
+
+    def test_manual_stop_completes_current_transaction_and_aborts_remaining(self):
+        c = self.controller
+        def finish(*args, **kwargs):
+            with self.assertRaises(ValueError):
+                c.request_stop("11111111")
+            c.request_stop("00000000")
+            self.assertTrue(c.snapshot()["stopping"])
+            return self.saved
+        with patch("history_controller.shared_timing_active",return_value=True), \
+             patch.object(c,"collect_archive_dev",side_effect=finish) as read:
+            c.start_extended_archive("00000000",confirmed=True)
+            c.worker.join(2)
+            read.assert_called_once_with("00000000",1,approved=True,_reserved=True)
+        state = c.snapshot()
+        self.assertEqual(state["status"],"aborted")
+        self.assertEqual(state["archive_progress"]["1"],"completed")
+        self.assertEqual(set(v for k,v in state["archive_progress"].items() if k!="1"),{"aborted"})
+        self.assertFalse(state["stopping"])
+        self.assertIsNone(state["manual_meter"])
+        self.assertFalse(c.blocked.is_set())
+
+    def test_retry_recovers_and_continues(self):
+        from archive_acquisition import ArchiveDataError
+        with patch("history_controller.shared_timing_active",return_value=True), \
+             patch.object(self.controller,"collect_archive_dev",side_effect=[ArchiveDataError("bad")]+[self.saved]*24) as read:
+            self.controller.start_extended_archive("00000000",confirmed=True)
+            self.controller.worker.join(2)
+        self.assertEqual([x.args[1] for x in read.call_args_list],[1]+list(range(1,25)))
+        self.assertEqual(self.controller.snapshot()["status"],"complete")
 
     def test_registry_readable_during_transaction(self):
         def reader(*args,**kwargs):

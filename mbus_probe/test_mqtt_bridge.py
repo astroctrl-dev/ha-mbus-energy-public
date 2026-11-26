@@ -31,9 +31,11 @@ class MqttTests(unittest.TestCase):
     def test_stable_discovery_and_units(self):
         first = discovery_messages("00000000")
         self.assertEqual(first, discovery_messages("00000000"))
-        self.assertEqual(len(first), 18)
-        self.assertEqual(len({json.loads(p)["unique_id"] for _, p, _ in first}), 18)
+        self.assertEqual(len(first), 19)
+        self.assertEqual(len({json.loads(p)["unique_id"] for _, p, _ in first}), 19)
         by_kind = {json.loads(p)["name"]: json.loads(p) for _, p, _ in first}
+        self.assertEqual(by_kind["Monthly History Failed"]["device_class"], "problem")
+        self.assertEqual(by_kind["Monthly History Failed"]["entity_category"], "diagnostic")
         self.assertEqual(len(by_kind["Energy"]["availability"]), 2)
         self.assertEqual(by_kind["Energy"]["availability_mode"], "all")
         self.assertEqual(by_kind["Flow"]["device_class"], "volume_flow_rate")
@@ -66,7 +68,7 @@ class MqttTests(unittest.TestCase):
         client = FakeClient()
         values = publish_reading(client, self.decoded, "00000000")
         self.assertEqual(values["energy"], 12345)
-        self.assertEqual(len(client.messages), 40)
+        self.assertEqual(len(client.messages), 41)
         self.assertEqual(client.messages[-1],
                          (availability_topic(device_key("00000000")), "online", 1, True))
         self.assertFalse(any("wrong_installation" in t for t, _, _, _ in client.messages))
@@ -203,7 +205,7 @@ class MqttTests(unittest.TestCase):
     def test_explicit_cleanup_clears_retained_discovery(self):
         client = FakeClient()
         cleanup_discovery(client, "00000000")
-        self.assertEqual(len(client.messages), 84)
+        self.assertEqual(len(client.messages), 85)
         self.assertTrue(all(payload == "" and retain
                             for _, payload, _, retain in client.messages[1:]))
 

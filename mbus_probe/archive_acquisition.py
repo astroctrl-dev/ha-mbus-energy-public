@@ -43,12 +43,27 @@ def collect_one(snapshot, address, meter_id, month_back, exchange, *, approved=F
     except Exception as exc:
         failure = exc
     finally:
-        try:
-            if exchange(restore_normal_frame(address)) != b"\xe5":
-                raise ValueError("restore not acknowledged")
-            verify_normal_frame(exchange(req),address,meter_id)
-        except Exception as exc:
-            raise RestorationError("normal frame not verified; stop polling") from exc
+        restored = False
+        last_error = None
+        for attempt in range(3):
+            try:
+                if not restored:
+                    if exchange(restore_normal_frame(address)) != b"\xe5":
+                        raise ValueError("restore not acknowledged")
+                    restored = True
+                response = exchange(req)
+                if not response:
+                    raise TimeoutError("normal verification timeout")
+                verify_normal_frame(response,address,meter_id)
+                break
+            except Exception as exc:
+                last_error = exc
+                # Re-select after a nonempty but invalid response; a timeout
+                # may be resolved by repeating the read without re-selection.
+                if not restored or not isinstance(exc, TimeoutError):
+                    restored = False
+        else:
+            raise RestorationError("normal frame not verified after three attempts; stop polling") from last_error
     if failure is not None:
         raise ArchiveDataError(str(failure)) from failure
     try:

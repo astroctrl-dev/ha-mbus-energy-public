@@ -21,7 +21,7 @@ class DSTMQTTTests(unittest.TestCase):
     def test_discovery_and_cleanup(self):
         meter = "12345678"
         messages = [(topic, json.loads(payload)) for topic, payload, _ in discovery_messages(meter)
-                    if "/binary_sensor/" in topic]
+                    if "/binary_sensor/" in topic and "dst_" in topic]
         self.assertEqual(len(messages), 2)
         for topic, payload in messages:
             self.assertEqual(payload["entity_category"], "diagnostic")

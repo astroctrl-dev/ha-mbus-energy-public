@@ -1,3 +1,14 @@
+## v2.9.1-beta.1
+
+- Retry recoverable extended archive errors up to three times per position and continue with remaining positions after verified normal-mode restoration.
+- Retry normal-mode restoration up to three times; block normal polling when verification fails.
+- Cancel manual history retrieval at a safe transaction boundary; preserve validated data and distinguish failed and aborted positions.
+- Bound established monthly history collection to three attempts per local day during a ten-day retry window. Persist attempts and manually acknowledged alarms across restarts.
+- Add a Monthly History Failed MQTT diagnostic and Web UI acknowledgement; alarm visibility in HA depends on normal polling availability.
+- Reorder Web UI sections and make history tables collapsible per meter.
+- Preserve existing entity identifiers, app slug and shared 60-second bus guard. No active frame-5 acquisition.
+- Automated validation passed on runtime candidate 6b185d3 (235 tests, image build and imports). Physical acceptance and publication approval pending.
+
 ## v2.9.0 (stable)
 
 - Extended monthly archive with historical volume and maximum power, flow and temperature measurements.

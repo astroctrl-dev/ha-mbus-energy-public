@@ -82,14 +82,15 @@ def discovery_messages(meter_id):
             payload["device_class"] = "timestamp"
         messages.append((topic, json.dumps(payload), True))
     for kind, label in (("dst_transition_failed", "DST Transition Failed"),
-                        ("dst_clock_override", "DST Clock Override")):
+                        ("dst_clock_override", "DST Clock Override"),
+                        ("monthly_history_failed", "Monthly History Failed")):
         payload = {"name": label, "unique_id": f"mbus_t230_{key}_{kind}",
                    "device": device, "state_topic": f"mbus/t230/{key}/{kind}/state",
                    "json_attributes_topic": f"mbus/t230/{key}/{kind}/attributes",
                    "payload_on": "ON", "payload_off": "OFF",
                    "availability": [{"topic": availability}, {"topic": BRIDGE_AVAILABILITY}],
                    "availability_mode": "all", "entity_category": "diagnostic"}
-        if kind == "dst_transition_failed":
+        if kind in ("dst_transition_failed", "monthly_history_failed"):
             payload["device_class"] = "problem"
         messages.append((f"homeassistant/binary_sensor/mbus_t230_{key}_{kind}/config",
                          json.dumps(payload), True))
@@ -112,6 +113,18 @@ def publish_dst_diagnostics(client, meter_id, state):
             if result.rc:
                 raise ConnectionError("MQTT DST diagnostic publish failed")
             result.wait_for_publish(timeout=5)
+
+
+def publish_monthly_retry(client, meter_id, alarm):
+    key = device_key(meter_id)
+    root = f"mbus/t230/{key}/monthly_history_failed"
+    value = alarm.get("active")
+    for suffix, payload in (("attributes", json.dumps(alarm)),
+                            ("state", "ON" if value is True else "OFF" if value is False else "None")):
+        result = client.publish(root + "/" + suffix, payload, qos=1, retain=False)
+        if result.rc:
+            raise ConnectionError("MQTT monthly retry diagnostic publish failed")
+        result.wait_for_publish(timeout=5)
 
 
 def history_discovery_messages(meter_id):

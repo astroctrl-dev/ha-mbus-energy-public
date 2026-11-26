@@ -24,7 +24,8 @@ from mqtt_bridge import (BRIDGE_AVAILABILITY, cleanup_discovery,
 from meter_registry import MeterRegistry
 from meter_ui import serve
 from history_controller import load_history
-from mqtt_bridge import publish_history
+from mqtt_bridge import publish_history, publish_monthly_retry
+from monthly_retry import MonthlyRetry
 
 LOG = logging.getLogger("mbus")
 STOP = threading.Event()
@@ -143,6 +144,12 @@ def publish_normal(config,client,decoded,read_at_utc=None):
         publish_dst_diagnostics(client, config["meter_id"], state)
     except (OSError, ConnectionError, RuntimeError):
         LOG.warning("DST diagnostic publication failed; ordinary readings preserved")
+    try:
+        import hashlib
+        key = "history:" + hashlib.sha256(config["meter_id"].encode()).hexdigest()
+        publish_monthly_retry(client, config["meter_id"], MonthlyRetry("/data/analysis").alarm(key))
+    except (OSError, ValueError, ConnectionError, RuntimeError):
+        LOG.warning("Monthly history diagnostic publication failed; ordinary readings preserved")
     if not config.get('log_measurement_data', True):
         return selected
     try:

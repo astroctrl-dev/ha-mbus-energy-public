@@ -23,6 +23,10 @@ class RestorationError(RuntimeError):
     """Normal frame was not verified. Ordinary polling must remain stopped."""
 
 
+class MonthlyDataError(ValueError):
+    """History acquisition failed after verified normal restoration."""
+
+
 def select_frame_two(address):
     if not 0 <= address <= 250:
         raise ValueError("primary address outside 0..250")
@@ -134,6 +138,7 @@ def run(port, baud, address, meter_id, timeout=5, *, read_set_day=False, setting
             write_frame(ser, command)
             ser.flush()
 
+        failure = None
         try:
             selected = True  # Attempt restore even if write/ACK fails.
             if read_set_day or settings_only:
@@ -169,31 +174,42 @@ def run(port, baud, address, meter_id, timeout=5, *, read_set_day=False, setting
                 if header.get("address") != address or header.get("control") not in (8, 24):
                     raise ValueError("monthly response address/control mismatch")
                 months = extract_months(frame, meter_id)
+        except (ValueError, OSError, RuntimeError) as exc:
+            failure = exc
         finally:
             if selected:
-                try:
-                    LOG.info("Monthly history: restoring normal frame")
-                    send(restore_normal_frame(address))
-                    if read_response(ser) != b"\xe5":
-                        raise ValueError("restore was not acknowledged")
-                    # ACK alone does not prove that ordinary records are back.
-                    req = bytes((0x10, 0x5B, address, (0x5B + address) & 255, 0x16))
-                    LOG.info("Monthly history: verifying normal frame")
-                    send(req)
-                    normal_frame = read_response(ser)
-                    verify_normal_frame(normal_frame, address, meter_id)
+                acknowledged = False
+                last_error = None
+                for attempt in range(1,4):
                     try:
-                        normal_clock = clock_observation(
-                            validate(normal_frame), datetime.now(timezone.utc).isoformat())
-                    except (ValueError, KeyError):
-                        normal_clock = None  # Valid history stays available without a usable clock.
-                    # Leave the bus idle before regular polling resumes.
-                    if not shared_timing_active():
-                        time.sleep(MIN_REQUEST_INTERVAL)
-                    LOG.info("Monthly history: normal frame verified")
-                except Exception as exc:
-                    LOG.warning("Monthly history restore failed: %s", str(exc) if isinstance(exc, ValueError) else type(exc).__name__)
-                    raise RestorationError("normal frame not verified; stop polling") from exc
+                        LOG.info("Monthly history: normal recovery attempt %d/3", attempt)
+                        if not acknowledged:
+                            send(restore_normal_frame(address))
+                            if read_response(ser) != b"\xe5":
+                                raise ValueError("restore was not acknowledged")
+                            acknowledged = True
+                        req = bytes((0x10, 0x5B, address, (0x5B + address) & 255, 0x16))
+                        send(req)
+                        normal_frame = read_response(ser)
+                        if not normal_frame:
+                            raise TimeoutError("normal verification timeout")
+                        verify_normal_frame(normal_frame, address, meter_id)
+                        break
+                    except Exception as exc:
+                        last_error = exc
+                        if not isinstance(exc, TimeoutError):
+                            acknowledged = False
+                else:
+                    raise RestorationError("normal frame not verified after three attempts; stop polling") from last_error
+                try:
+                    normal_clock = clock_observation(validate(normal_frame), datetime.now(timezone.utc).isoformat())
+                except (ValueError, KeyError):
+                    normal_clock = None
+                if not shared_timing_active():
+                    time.sleep(MIN_REQUEST_INTERVAL)
+                LOG.info("Monthly history: normal frame verified")
+        if failure is not None:
+            raise MonthlyDataError(str(failure)) from failure
         if (read_set_day or settings_only) and normal_clock is not None:
             normal_clock = dict(normal_clock, monthly_set_day=set_day)
             if error_history is not None:

@@ -12,17 +12,20 @@ from history_controller import HistoryController, load_history
 from clock_maintenance import ClockController
 from clock_model import configured_local
 from dst_transition import TransitionStore
-from mqtt_bridge import publish_history
+from mqtt_bridge import publish_history, publish_monthly_retry
+from monthly_retry import MonthlyRetry
+import hashlib
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
 
 PAGE = r"""<!doctype html><html lang="no"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>M-Bus målere</title>
-<style>html,body{margin:0;min-height:100%;background:#f7f9fb;color:#17212b;font:16px/1.5 system-ui,-apple-system,sans-serif}main{max-width:720px;margin:0 auto;padding:20px 16px 40px}h1{font-size:1.5rem;line-height:1.2;margin:0 0 8px}h2{font-size:1.15rem;margin:24px 0 8px}p{margin:8px 0}button{min-height:44px;max-width:100%;border:1px solid #8a9aaa;border-radius:8px;background:#e8f1fa;color:#152b3e;padding:8px 14px;font:inherit;margin:4px 4px 4px 0}button:disabled{opacity:.55}button:focus-visible{outline:3px solid #1266ab}.table-wrap{overflow-x:auto;background:#fff;border:1px solid #d0d9e1;border-radius:8px}table{border-collapse:collapse;width:100%;font:inherit}th,td{text-align:left;padding:8px;border-bottom:1px solid #d0d9e1;white-space:nowrap}#status{background:#fff;border:1px solid #d0d9e1;border-radius:8px;padding:12px}.meter{background:#fff;border:1px solid #d0d9e1;border-radius:8px;padding:12px;margin:8px 0;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;overflow-wrap:anywhere}#error{color:#a12020;overflow-wrap:anywhere}</style><main><h1>M-Bus målere</h1><p>Søk leser primæradressene 0–250. Målere med delt adresse kan ikke alltid skilles.</p>
+<style>html,body{margin:0;min-height:100%;background:#f7f9fb;color:#17212b;font:16px/1.5 system-ui,-apple-system,sans-serif}main{max-width:720px;margin:0 auto;padding:20px 16px 40px}h1{font-size:1.5rem;line-height:1.2;margin:0 0 8px}h2{font-size:1.15rem;margin:24px 0 8px}p{margin:8px 0}button{min-height:44px;max-width:100%;border:1px solid #8a9aaa;border-radius:8px;background:#e8f1fa;color:#152b3e;padding:8px 14px;font:inherit;margin:4px 4px 4px 0}button:disabled{opacity:.55}button:focus-visible{outline:3px solid #1266ab}.table-wrap{overflow-x:auto;background:#fff;border:1px solid #d0d9e1;border-radius:8px}table{border-collapse:collapse;width:100%;font:inherit}th,td{text-align:left;padding:8px;border-bottom:1px solid #d0d9e1;white-space:nowrap}#status{background:#fff;border:1px solid #d0d9e1;border-radius:8px;padding:12px}.meter{background:#fff;border:1px solid #d0d9e1;border-radius:8px;padding:12px;margin:8px 0;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;overflow-wrap:anywhere}details{margin:12px 0}summary{cursor:pointer;font-weight:600;padding:8px 0}#error{color:#a12020;overflow-wrap:anywhere}</style><main><h1>M-Bus målere</h1><p>Søk leser primæradressene 0–250. Målere med delt adresse kan ikke alltid skilles.</p>
 <p>Initial readings are normally available within about 60 seconds. If the meter is in a confirmed historical telegram mode, automatic restoration of normal telegram mode may take about three minutes in total. Communication errors may extend this time. The minimum interval between commands is 60 seconds.</p><button id="scan">Søk etter målere</button><button id="auto">Velg eneste ledige automatisk</button>
+<h2>Tilgjengelige målere</h2><div id="available"></div>
+<h2>Etablerte målere</h2><div id="selected"></div>
 <h2>Klokke</h2><p>Synkronisering bruker systemtid og valgt tidssone i Configuration. Manuell synkronisering krever bekreftelse; automatisk kontroll starter etter første gyldige måling ved oppstart eller nytt målervalg.</p><p id="clock-status"></p><h2>Analyse</h2><p>Last ned validerte normalavlesninger og lagret månedshistorikk som Excel-fil. Nedlasting leser lagrede data og sender ingen kommando til måleren. Historikk hentes separat med knappen ved den valgte måleren.</p><p>Measurement data logging is controlled separately in Configuration. Disabling capture keeps existing files and history.</p><button id="export">Last ned analyse (.xlsx)</button>
-<h2>Raw telegram diagnostics</h2><p>Local capture may contain meter identifiers and consumption. Enable raw capture in Configuration; restart the app to apply. No extra bus requests.</p><p id="raw-status"></p><button id="raw-download">Download raw text (.txt)</button><p id="status"></p><h2>Lagret månedshistorikk</h2><p>First installation: leave all optional switches off and verify ordinary live measurements before enabling additional functions. Initial retrieval reads frames 2 and 3. Subsequent manual retrieval reads missing extended months (frame 4); allow about four minutes per month. The table shows progress for the current job. Regular polling pauses; live values may be stale or temporarily unavailable. Clock synchronization and scanning also respect the interval. Downloads use saved data and do not query the meter.</p><p>Positions indicate the order in the meter archive. A dash means no retrieval has been started in this session. Saved energy values remain visible while extended data is being read.</p><div id="history"></div><h2>Tilgjengelige målere</h2><div id="available"></div>
-<h2>Etablerte målere</h2><div id="selected"></div><p id="error" role="alert"></p>
+<h2>Lagret månedshistorikk</h2><p>First installation: leave all optional switches off and verify ordinary live measurements before enabling additional functions. Initial retrieval reads frames 2 and 3. Subsequent manual retrieval reads missing extended months (frame 4); allow about four minutes per month. The table shows progress for the current job. Regular polling pauses; live values may be stale or temporarily unavailable. Clock synchronization and scanning also respect the interval. Downloads use saved data and do not query the meter.</p><p>Positions indicate the order in the meter archive. A dash means no retrieval has been started in this session. Saved energy values remain visible while extended data is being read.</p><div id="history"></div><h2>Raw telegram diagnostics</h2><p>Local capture may contain meter identifiers and consumption. Enable raw capture in Configuration; restart the app to apply. No extra bus requests.</p><p id="raw-status"></p><button id="raw-download">Download raw text (.txt)</button><p id="status"></p><p id="error" role="alert"></p>
 </main><script>
 const root = location.pathname.replace(/\/$/, '');
 let refreshing = false;
@@ -38,24 +41,29 @@ function addCell(row, value, heading=false) {
 async function refreshHistory() {
   const data = await call('/api/history');
   const area = document.getElementById('history');
+  const previousOpen = new Map(Array.from(area.querySelectorAll('details[data-meter]'), d => [d.dataset.meter, d.open]));
   area.replaceChildren();
   if (!data.histories.length) { area.textContent = 'Ingen lagret månedshistorikk.'; return; }
   for (const entry of data.histories) {
-    const title = document.createElement('h3'); title.textContent = entry.alias; area.append(title);
+    const details = document.createElement('details');
+    details.dataset.meter = entry.alias;
+    details.open = previousOpen.get(entry.alias) ?? (data.histories.length === 1 || data.archive_alias === entry.alias);
+    const title = document.createElement('summary'); title.textContent = entry.alias; details.append(title);
+    area.append(details);
     const evidence = document.createElement('p');
     evidence.textContent = entry.snapshot.rollover_evidence === 'confirmed_shift'
       ? 'Månedsskifte bekreftet ved forskyvning av alle 24 arkivposisjoner.'
       : 'Månedsskifte ikke bekreftet ved sammenligning med forrige avlesning.';
-    area.append(evidence);
+    details.append(evidence);
     const errors = entry.snapshot.error_history;
     if (errors) {
       const label = document.createElement("p");
       label.textContent = localText("ERROR_HISTORY_TITLE") + ": " + (errors.read_at_utc ?? "—");
-      area.append(label);
+      details.append(label);
       const list = document.createElement("p");
       list.textContent = Object.entries({"FT":"Last Negative Temperature Difference (FT)","FF2":"Last Reverse Flow (FF2)","FS":"Last Sensor Error (FS)","FE":"Last Electronic Error (FE)","FF1":"Last Flow Rate Error (FF1)"}).map(([code,label]) => label + ": " + (errors.last_occurrence_local?.[code] ?? "—")).join("; ");
-      area.append(list);
-      const note = document.createElement("p"); note.textContent = localText("ERROR_HISTORY_NOTE"); area.append(note);
+      details.append(list);
+      const note = document.createElement("p"); note.textContent = localText("ERROR_HISTORY_NOTE"); details.append(note);
     }
     const wrap = document.createElement('div'); wrap.className = 'table-wrap';
     const table = document.createElement('table'); const head = document.createElement('tr');
@@ -63,8 +71,8 @@ async function refreshHistory() {
     table.append(head);
     const periods = new Map(entry.snapshot.bounded_periods.map(p => [p.newer_storage, p.period_kwh]));
     const progress = data.archive_alias === entry.alias ? data.archive_progress : {};
-    const statusLabels = {waiting:'Waiting',request:'Request',completed:'Completed',stored:'Already stored',failed:'Failed'};
-    const statusColors = {waiting:'#777',request:'#a66b00',completed:'#17803d',stored:'#17803d',failed:'#b91c1c'};
+    const statusLabels = {waiting:'Waiting',request:'Request',completed:'Completed',stored:'Already stored',failed:'Failed',aborted:'Aborted',retry2:'Retry 2/3',retry3:'Retry 3/3'};
+    const statusColors = {waiting:'#777',request:'#a66b00',completed:'#17803d',stored:'#17803d',failed:'#b91c1c',aborted:'#777',retry2:'#a66b00',retry3:'#a66b00'};
     for (const stand of entry.snapshot.stands) {
       const row = document.createElement('tr');
       addCell(row, '−' + String(stand.month_back).padStart(2, '0'));
@@ -77,7 +85,7 @@ async function refreshHistory() {
       row.append(cell);
       table.append(row);
     }
-    wrap.append(table); area.append(wrap);
+    wrap.append(table); details.append(wrap);
   }
 }
 async function call(path, body) {
@@ -109,7 +117,7 @@ async function refresh() {
       (state.clock.result ? `Før: ${state.clock.result.before || '—'}, mål: ${state.clock.result.target || 'ingen endring'}, etter: ${state.clock.result.after || '—'}. ` : '') +
       (state.clock.result && state.clock.result.dst_test ? `DST 1: ${state.clock.result.dst_test_results?.["1"] === true ? "PASS" : state.clock.result.dst_test_results?.["1"] === false ? "FAIL" : "NOT TESTED"}; DST 0: ${state.clock.result.dst_test_results?.["0"] === true ? "PASS" : state.clock.result.dst_test_results?.["0"] === false ? "FAIL" : "NOT TESTED"}; restored: ${state.clock.result.clock_restored ? "PASS" : "FAIL"}. ` : '') + (localText(state.clock.error) || '');
     if (state.history.archive_revision !== lastArchiveRevision ||
-        (state.history.status === 'complete' && state.history.captured_at_utc !== lastHistoryCapture)) {
+        (state.history.captured_at_utc && state.history.captured_at_utc !== lastHistoryCapture)) {
       await refreshHistory();
       lastHistoryCapture = state.history.captured_at_utc;
       lastArchiveRevision = state.history.archive_revision;
@@ -117,7 +125,7 @@ async function refresh() {
     const busy = historySubmitting || state.history.status === 'running' || state.clock.status === 'running' || state.scan_status === 'running';
     document.getElementById('scan').disabled = busy;
     document.getElementById('auto').disabled = busy || state.scan_status !== 'completed' || state.scan_errors.length > 0 || state.available.filter(m => m.supported).length !== 1;
-    const lists = JSON.stringify([busy, state.available, state.selected, state.history_enabled, state.history.status, state.clock_enabled, state.auto_clock_sync, state.clock.status, state.clock_target, state.migrations, state.dst_diagnostics]);
+    const lists = JSON.stringify([busy, state.available, state.selected, state.history_enabled, state.history.status, state.history.manual_meter, state.history.stopping, state.clock_enabled, state.auto_clock_sync, state.clock.status, state.clock_target, state.migrations, state.dst_diagnostics, state.monthly_alarms]);
     if (lists !== lastLists) {
       lastLists = lists;
     for (const name of ['available', 'selected']) {
@@ -133,6 +141,14 @@ async function refresh() {
           diagnostic.textContent = localText('DST_TRANSITION_FAILED') + ': ' + flag(dstState.dst_transition_failed) +
             '; ' + localText('DST_CLOCK_OVERRIDE') + ': ' + flag(dstState.dst_clock_override);
           line.append(diagnostic);
+          const alarm = (state.monthly_alarms || {})[item.meter_id] || {};
+          const historyAlarm = document.createElement("p");
+          historyAlarm.textContent = "Monthly history failed: " + flag(alarm.active);
+          line.append(historyAlarm);
+          if (alarm.active === true) {
+            const ack = button("Acknowledge history failure", () => act("/api/ack_history", item.meter_id));
+            line.append(ack);
+          }
           const remove = button('Fjern', () => act('/api/remove', item.meter_id)); remove.disabled = busy; line.append(remove);
           const hist = button('Hent månedshistorikk', async () => {
             if (!confirm('Read monthly archive? Existing energy history is preserved. Missing extended months are read individually; a full archive can require over 90 minutes. Normal polling may pause. Continue?')) return;
@@ -154,6 +170,16 @@ async function refresh() {
             line.append(migrate);
           }
           line.append(hist);
+          if (state.history.manual_meter === item.meter_id) {
+            const stopHistory = button(state.history.stopping ? 'Stopping…' : 'Stop', async () => {
+              stopHistory.disabled = true;
+              try { await call('/api/stop_history', {meter_id:item.meter_id}); }
+              catch (e) { document.getElementById('error').textContent=e.message; }
+              finally { lastLists=''; await refresh(); }
+            });
+            stopHistory.disabled = state.history.stopping;
+            line.append(stopHistory);
+          }
           const clock = button('Synkroniser målerklokke', async () => {
             if (!confirm('Sette målerens klokke til systemtid i ' + state.clock_target + '? Dette skriver til måleren. Fortsette?')) return;
             try { await call('/api/clock', {meter_id:item.meter_id, confirm:true}); document.getElementById('error').textContent=''; await refresh(); }
@@ -262,6 +288,13 @@ def serve(registry, config, client, bus_lock, stop, port=8099, history_controlle
                 result[meter_id] = {"dst_transition_failed": None, "dst_clock_override": None}
         return result
 
+    def monthly_alarm(meter_id):
+        key = "history:" + hashlib.sha256(meter_id.encode()).hexdigest()
+        try:
+            return MonthlyRetry("/data/analysis").alarm(key)
+        except (OSError, ValueError):
+            return {"active": None}
+
     class Handler(BaseHTTPRequestHandler):
         def _send(self, status, payload, content_type="application/json"):
             body = (payload if isinstance(payload, str) else json.dumps(payload)).encode()
@@ -281,6 +314,7 @@ def serve(registry, config, client, bus_lock, stop, port=8099, history_controlle
                                  "migrations": {r["meter_id"]: history_controller.migration_status(r["meter_id"]) for r in registry.snapshot()["selected"]},
                                  "raw_log": raw_log.status() if raw_log else None,
                                  "dst_diagnostics": dst_diagnostics(),
+                                 "monthly_alarms": {r["meter_id"]: monthly_alarm(r["meter_id"]) for r in registry.snapshot()["selected"]},
                                  "history_enabled": config.get("allow_monthly_history", False),
                                  "clock": clock_controller.snapshot(),
                                  "clock_enabled": config.get("allow_clock_sync", False),
@@ -340,7 +374,7 @@ def serve(registry, config, client, bus_lock, stop, port=8099, history_controlle
                 self._send(403, {"error": "ingress required"})
                 return
             route = self.path.rsplit("/", 2)[-1]
-            if route not in ("scan", "select", "auto", "remove", "history", "clock", "migrate"):
+            if route not in ("scan", "select", "auto", "remove", "history", "clock", "migrate", "ack_history", "stop_history"):
                 self._send(404, {"error": "not found"})
                 return
             try:
@@ -349,6 +383,20 @@ def serve(registry, config, client, bus_lock, stop, port=8099, history_controlle
                     raise ValueError("invalid request length")
                 data = json.loads(self.rfile.read(length) or b"{}")
                 meter_id = data.get("meter_id")
+                if route == "stop_history":
+                    history_controller.request_stop(meter_id)
+                    self._send(200, registry.snapshot())
+                    return
+                if route == "ack_history":
+                    with registry.lock:
+                        if meter_id not in registry.selected:
+                            raise ValueError("meter not selected")
+                    key = "history:" + hashlib.sha256(meter_id.encode()).hexdigest()
+                    ledger = MonthlyRetry("/data/analysis")
+                    ledger.acknowledge(key)
+                    publish_monthly_retry(client, meter_id, ledger.alarm(key))
+                    self._send(200, registry.snapshot())
+                    return
                 if history_controller.blocked.is_set():
                     raise ValueError("Normal telegram not yet verified")
                 if history_controller.snapshot()["status"] == "running":
@@ -370,7 +418,7 @@ def serve(registry, config, client, bus_lock, stop, port=8099, history_controlle
                     if history_controller.migration_status(meter_id) == "complete":
                         history_controller.start_extended_archive(meter_id,confirmed=data.get("confirm"))
                     else:
-                        history_controller.start(meter_id)
+                        history_controller.start(meter_id, manual=True)
                 elif route == "clock":
                     if history_controller.migration_status(meter_id) in ("pending", "invalid"):
                         raise ValueError("migrate saved history before clock synchronization")

@@ -14,7 +14,7 @@ from mqtt_bridge import device_key
 from rolling_history import merge_history
 from archive_acquisition import ArchiveDataError
 from mbus_records import t230_footer
-from monthly_diagnostic import (RestorationError, run as read_months, extract_months, extract_monthly_set_day,
+from monthly_diagnostic import (MonthlyDataError, RestorationError, run as read_months, extract_months, extract_monthly_set_day,
                                 restore_normal_frame, read_response)
 from mbus_probe import read_one, validate
 from ha_measurements import REQUIRED_SENSORS, select_measurements
@@ -62,13 +62,17 @@ class HistoryController:
         self.archive_progress = {}
         self.archive_meter = None
         self.archive_revision = 0
+        self.cancel_requested = threading.Event()
+        self.manual_meter = None
         self.startup_pending = False
         self.startup_readings = []
 
     def snapshot(self):
         with self.lock:
             return {**self.state, "archive_meter": self.archive_meter,
-                    "archive_progress": dict(self.archive_progress), "archive_revision": self.archive_revision}
+                    "archive_progress": dict(self.archive_progress), "archive_revision": self.archive_revision,
+                    "manual_meter": self.manual_meter if self.state["status"] == "running" else None,
+                    "stopping": self.state["status"] == "running" and self.cancel_requested.is_set()}
 
     def _recovery_log(self, tx, rx):
         LOG.info("Recovery TX=%s RX length=%d bytes", tx.hex(" "), len(rx))
@@ -301,11 +305,20 @@ class HistoryController:
             if self.migration_status(meter_id) != "complete":
                 raise ValueError("retrieve ordinary monthly history first")
             self.state = {"status":"running","error":None,"captured_at_utc":None}
+            self.cancel_requested.clear()
+            self.manual_meter = meter_id
             self.archive_meter = meter_id
             self.archive_progress = {str(i):"waiting" for i in range(1,25)}
             self.archive_revision += 1
             self.worker = threading.Thread(target=self._extended_archive_worker,args=(meter_id,),daemon=True)
             self.worker.start()
+
+    def request_stop(self, meter_id):
+        with self.lock:
+            if self.state["status"] != "running" or self.manual_meter != meter_id:
+                raise ValueError("No active manual history retrieval for this meter")
+            self.cancel_requested.set()
+            self.archive_revision += 1
 
     def _archive_row(self, position, status):
         with self.lock:
@@ -314,12 +327,14 @@ class HistoryController:
 
     def _extended_archive_worker(self, meter_id):
         position = None
+        had_failures = False
+        final_state = {"status":"failed","error":"Extended archive stopped","captured_at_utc":None}
         try:
             path = history_file(self.root,meter_id)
             saved = json.loads(path.read_text(encoding="utf-8"))
             for row in saved["stands"]:
-                if self.stop.is_set():
-                    raise ValueError("archive stopped")
+                if self.stop.is_set() or self.cancel_requested.is_set():
+                    break
                 position = row["month_back"]
                 evidence = row.get("frame4") or {}
                 maxima = evidence.get("maxima") or {}
@@ -329,21 +344,43 @@ class HistoryController:
                             for k in ("power","flow","flow_temperature","return_temperature"))):
                     self._archive_row(position,"stored")
                     continue
-                self._archive_row(position,"request")
-                LOG.info("Extended archive: requesting position %d/24",position)
-                saved = self.collect_archive_dev(meter_id,position,approved=True,_reserved=True)
-                self._archive_row(position,"completed")
-                LOG.info("Extended archive: position %d/24 validated and saved",position)
-            with self.lock:
-                self.state = {"status":"complete","error":None,"captured_at_utc":saved["captured_at_utc"]}
+                for attempt in range(1,4):
+                    if self.stop.is_set() or self.cancel_requested.is_set():
+                        break
+                    self._archive_row(position,"request" if attempt == 1 else f"retry{attempt}")
+                    LOG.info("Extended archive: position %d/24 attempt %d/3",position,attempt)
+                    try:
+                        saved = self.collect_archive_dev(meter_id,position,approved=True,_reserved=True)
+                    except ArchiveDataError:
+                        if self.blocked.is_set() or self.marker.exists():
+                            raise
+                        if self.cancel_requested.is_set() or self.stop.is_set():
+                            break
+                        if attempt == 3:
+                            had_failures = True
+                            self._archive_row(position,"failed")
+                        continue
+                    self._archive_row(position,"completed")
+                    LOG.info("Extended archive: position %d/24 validated and saved",position)
+                    break
+            final_state = {"status":"aborted" if self.cancel_requested.is_set() or self.stop.is_set() else ("failed" if had_failures else "complete"),
+                           "error":"Some archive positions failed" if had_failures else None,
+                           "captured_at_utc":saved["captured_at_utc"]}
         except Exception as exc:
-            if position is not None:
-                self._archive_row(position,"failed")
             LOG.warning("Extended archive stopped at position %s: %s",position,type(exc).__name__)
+            final_state = {"status":"restore_unverified" if self.blocked.is_set() or self.marker.exists() else "failed",
+                           "error":"Extended archive stopped; previously saved data retained",
+                           "captured_at_utc":None}
+        finally:
             with self.lock:
-                self.state = {"status":"restore_unverified" if self.blocked.is_set() or self.marker.exists() else "failed",
-                              "error":"Extended archive stopped; previously saved data retained",
-                              "captured_at_utc":None}
+                for key, status in self.archive_progress.items():
+                    if status in ("waiting","request","retry2","retry3"):
+                        self.archive_progress[key] = "aborted"
+                self.archive_revision += 1
+                if self.cancel_requested.is_set() and final_state["status"] == "complete":
+                    final_state["status"] = "aborted"
+                self.state = final_state
+                self.manual_meter = None
 
     def collect_archive_dev(self, meter_id, month_back, *, approved=False, reader=None, _reserved=False):
         """Single dev transaction only. No GUI, polling or startup caller.
@@ -412,12 +449,12 @@ class HistoryController:
             return updated
         except Exception:
             with self.lock:
-                self.state = {"status":"restore_unverified" if self.marker.exists() else "failed",
+                self.state = {"status":"running" if _reserved else ("restore_unverified" if self.marker.exists() or self.blocked.is_set() else "failed"),
                               "error":"Archive collection failed; existing history preserved",
                               "captured_at_utc":None}
             raise
 
-    def start(self, meter_id, *, replace=False, settings_only=False):
+    def start(self, meter_id, *, replace=False, settings_only=False, manual=False):
         if self.config.get("allow_monthly_history") is not True:
             raise ValueError("Aktiver månedshistorikk i appens Configuration først")
         if self.stop.is_set() or self.blocked.is_set():
@@ -432,6 +469,8 @@ class HistoryController:
             if self.migration_status(meter_id) in ("pending", "invalid"):
                 raise ValueError("migrate saved history before collection")
             self.state = {"status": "running", "error": None, "captured_at_utc": None}
+            self.cancel_requested.clear()
+            self.manual_meter = meter_id if manual else None
             self.archive_progress = {}
             self.archive_meter = None
             self.archive_revision += 1
@@ -448,6 +487,11 @@ class HistoryController:
                 # A normal poll or scan may have finished immediately before the lock.
                 if not shared_timing_active():
                     self.pause(60)
+                if self.cancel_requested.is_set():
+                    with self.lock:
+                        self.manual_meter = None
+                        self.state = {"status":"aborted","error":None,"captured_at_utc":None}
+                    return
                 # Marker survives process crash. Clear only after verified restore.
                 self.root.mkdir(parents=True, exist_ok=True)
                 fd = os.open(self.marker, os.O_WRONLY | os.O_CREAT, 0o600)
@@ -458,6 +502,9 @@ class HistoryController:
                                          address, meter_id, **kwargs)
                     # The reader returns only after a verified normal frame.
                     self.marker.unlink()
+                except MonthlyDataError:
+                    self.marker.unlink()
+                    raise
                 except Exception:
                     # Set the guard before releasing the bus lock. A queued
                     # poll must never slip into an uncertain interface state.
@@ -536,7 +583,8 @@ class HistoryController:
                     except (OSError, ValueError, ConnectionError):
                         LOG.warning("History saved but MQTT publication failed")
                 with self.lock:
-                    self.state = {"status": "complete", "error": None,
+                    self.manual_meter = None
+                    self.state = {"status": "aborted" if self.cancel_requested.is_set() else "complete", "error": None,
                                   "captured_at_utc": snapshot["captured_at_utc"]}
         except Exception as exc:
             # No ID, raw telegram, serial path or exception details in UI/logs.
@@ -547,6 +595,7 @@ class HistoryController:
             LOG.error("Monthly history failed: %s%s", type(exc).__name__,
                       "; normal frame unverified, polling stopped" if uncertain else "")
             with self.lock:
+                self.manual_meter = None
                 self.state = {"status": "restore_unverified" if uncertain else "failed",
                               "error": "Normalramme ikke verifisert; polling stoppet" if uncertain
                                        else "Historikkavlesning feilet; tidligere data beholdt",

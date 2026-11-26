@@ -113,6 +113,31 @@ class ScheduleTests(unittest.TestCase):
         self.assertTrue(self.schedule.history_due("12345678", self.local))
 
 
+    def test_monthly_retry_window_crosses_calendar_month(self):
+        self.local = self.local.replace(month=12,day=2)
+        self.save_archive(month=10,day=28)
+        key, first = self.schedule.history_retry_window("12345678",self.local)
+        self.assertTrue(key.endswith(":2026-11"))
+        self.assertEqual(first,date(2026,11,29))
+        self.assertTrue(self.schedule.history_due("12345678",self.local))
+        self.assertTrue(self.schedule.monthly_retry.eligible(key,self.local.date(),first))
+
+    def test_monthly_daily_limit_survives_scheduler_restart(self):
+        self.schedule.config["auto_clock_sync"] = False
+        self.local = self.local.replace(month=12,day=2)
+        self.save_archive(month=11,day=1)
+        self.history.status = "failed"
+        key, first = self.schedule.history_retry_window("12345678",self.local)
+        self.assertTrue(self.schedule.monthly_retry.reserve(key,self.local.date(),first))
+        self.schedule = MaintenanceSchedule(self.schedule.config, self.clock, self.history,
+            threading.Event(), now=lambda:self.local, monotonic=lambda:self.mono, root=self.tmp.name)
+        for _ in range(4):
+            self.round()
+            self.mono += 600
+        self.assertEqual(len(self.history.calls),2)
+        self.assertTrue(self.schedule.monthly_retry.alarm(key.rsplit(":",1)[0])["active"])
+        self.assertFalse(self.schedule.monthly_retry.eligible(key,self.local.date(),first))
+
     def test_in_sync_clock_needs_no_extra_request(self):
         self.schedule.config["auto_monthly_history"] = False
         self.schedule.observe_clock("12345678", {"clock_out_of_sync": False, "clock_offset_seconds": -42})
