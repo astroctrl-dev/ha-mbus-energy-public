@@ -11,7 +11,7 @@ Read Landis+Gyr T230 over wired M-Bus, expose measurements via MQTT Discovery, a
 ## Configuration
 
 1. Select the actual serial_port under **Settings → Apps → M-Bus T230 energimåling → Configuration** and use the documented meter baud rate.
-2. Default mqtt_host is core-mosquitto for a local broker. Enter MQTT credentials locally. Select a polling interval of at least 90 seconds; default 120.
+2. Default mqtt_host is core-mosquitto for a local broker. Enter MQTT credentials locally. Select a polling interval of at least 60 seconds; default 120. Slots that cannot satisfy the shared bus guard are skipped.
 3. Save and start, open the web UI and discover meters (**Scan for meters**). Add (**Add**) a verified result. Meter ID and primary address appear locally. The app supports English, Norwegian Bokmål, Norwegian Nynorsk and German.
 4. Verify the seven measurement sensors and diagnostics under **Settings → Devices & services → MQTT**. Save and restart after configuration changes.
 
@@ -27,9 +27,11 @@ Enable allow_monthly_history, save and restart, then select **Retrieve monthly h
 
 On completion, the web UI shows 24 readings and 23 differences. Excel includes the history worksheets (currently named **Månedshistorikk** and **Månedsforbruk**). A stored snapshot may also be displayed after restart. Without stored history, only regular readings are exported.
 
+Extended archive retrieval can be stopped at a safe transaction boundary and resumed later. Complete stored positions appear as Already stored on startup; missing positions show a dash. Recoverable errors are retried up to three times per position. Automatic monthly history retry is limited to three attempts per local day within a ten-day window. An unresolved failure is reported by the Monthly History Failed diagnostic and can be acknowledged in the Web UI.
+
 ## Updates and rollback
 
-All earlier versions should be upgraded to v2.4.0. The application now coordinates M-Bus transmissions using a shared timing gate and skips missed polling slots. Back up app data and settings, update through Settings → Apps, and verify meter selection, MQTT entities and fresh readings. On failure, stop, restore the previous app version and corresponding backup, restart and verify MQTT and normal-frame status. Never run two copies against the same adapter and MQTT identities.
+The current stable release is v2.9.1. Existing entity IDs, app slug and stored history are preserved; no data migration is required for upgrades from v2.9.0 or v2.9.1 betas. The application now coordinates M-Bus transmissions using a shared timing gate and skips missed polling slots. Back up app data and settings, update through Settings → Apps, and verify meter selection, MQTT entities and fresh readings. On failure, stop, restore the previous app version and corresponding backup, restart and verify MQTT and normal-frame status. Never run two copies against the same adapter and MQTT identities.
 
 ## Clock synchronization
 
