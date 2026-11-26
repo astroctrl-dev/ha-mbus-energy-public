@@ -1,7 +1,16 @@
+## v2.9.1 (stable)
+
+- Retry recoverable extended archive errors up to three times per position, and continue after verified normal-mode restoration.
+- Stop manual retrieval at a safe transaction boundary, preserving completed data and showing aborted positions.
+- Bound automatic monthly history retries to three attempts per local day within a ten-day window; persist retry state and alarm acknowledgement across restarts.
+- Show complete saved extended archive positions as Already stored immediately in the Web UI, with a dash for missing data. No additional bus requests.
+- Preserve existing entity identifiers, app slug, stored data format and shared 60-second bus guard. No migration required; back up before updating.
+- Beta validation: 236 automated tests, image build and runtime imports passed; 21/21 beta.1 and 5/5 beta.2 manual acceptance checks passed. Physical fault-injection and automatic retry exhaustion have not been verified.
+
 ## v2.9.1-beta.2
 
 - Show complete locally stored extended archive positions as Already stored on startup; unread or incomplete positions remain unmarked. Preserve retrieval and Stop job statuses. No additional M-Bus requests.
-- Manual beta.1 acceptance: 21/21 checklist items reported passed by product owner. Beta.2 validation pending.
+- Manual beta.1 acceptance: 21/21 checklist items reported passed by product owner. Beta.2 acceptance: 5/5 manual checks and 236 automated tests passed.
 
 ## v2.9.1-beta.1
 
@@ -12,7 +21,7 @@
 - Add a Monthly History Failed MQTT diagnostic and Web UI acknowledgement; alarm visibility in HA depends on normal polling availability.
 - Reorder Web UI sections and make history tables collapsible per meter.
 - Preserve existing entity identifiers, app slug and shared 60-second bus guard. No active frame-5 acquisition.
-- Automated validation passed on runtime candidate 6b185d3 (235 tests, image build and imports). Physical acceptance and publication approval pending.
+- Automated validation passed on runtime candidate 6b185d3 (235 tests, image build and imports). Physical acceptance: 21/21 manual checks passed.
 
 ## v2.9.0 (stable)
 
