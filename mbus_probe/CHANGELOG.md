@@ -1,3 +1,15 @@
+## v3.0.0-beta.3
+
+- Improve mobile address entry with a large three-digit numeric field, explicit range validation, and separate compact search controls.
+- Group Excel and raw telegram downloads under Data export; shorten descriptions and display storage errors only when present.
+- Remove the two DST diagnostic status lines from the meter card; retain the underlying diagnostics and clock behaviour.
+
+- Resume a stopped full primary-address search from the first unfinished address, preserving results and progress within the current app session.
+- Starting a new full search can discard previous results after confirmation. Changed registered address context invalidates stopped results.
+- Show unanswered candidates as Available (no response), with light-green selectable addresses and ranges. Selection only fills the address field.
+- Color-code selectable conflict candidates yellow, failed or blocked candidates red and the current address neutral. Disable selection of red and neutral results.
+- Missing responses do not guarantee availability. Physical address writing remains disabled.
+
 ## v3.0.0-beta.2
 
 - Place the primary address panel immediately below the selected meter's identity, with a close control.

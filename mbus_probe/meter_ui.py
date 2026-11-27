@@ -21,12 +21,12 @@ from zoneinfo import ZoneInfo
 
 
 PAGE = r"""<!doctype html><html lang="no"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>M-Bus målere</title>
-<style>html,body{margin:0;min-height:100%;background:#f7f9fb;color:#17212b;font:16px/1.5 system-ui,-apple-system,sans-serif}main{max-width:720px;margin:0 auto;padding:20px 16px 40px}h1{font-size:1.5rem;line-height:1.2;margin:0 0 8px}h2{font-size:1.15rem;margin:24px 0 8px}p{margin:8px 0}button{min-height:44px;max-width:100%;border:1px solid #8a9aaa;border-radius:8px;background:#e8f1fa;color:#152b3e;padding:8px 14px;font:inherit;margin:4px 4px 4px 0}button:disabled{opacity:.55}button:focus-visible{outline:3px solid #1266ab}.table-wrap{overflow-x:auto;background:#fff;border:1px solid #d0d9e1;border-radius:8px}table{border-collapse:collapse;width:100%;font:inherit}th,td{text-align:left;padding:8px;border-bottom:1px solid #d0d9e1;white-space:nowrap}#status{background:#fff;border:1px solid #d0d9e1;border-radius:8px;padding:12px}.meter{background:#fff;border:1px solid #d0d9e1;border-radius:8px;padding:12px;margin:8px 0;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;overflow-wrap:anywhere}details{margin:12px 0}summary{cursor:pointer;font-weight:600;padding:8px 0}#error{color:#a12020;overflow-wrap:anywhere}.active-diagnostics{width:100%;border-top:1px solid #d0d9e1;padding-top:8px}.battery-line{display:flex;align-items:center;gap:10px}.battery-symbol{width:48px;height:23px;position:relative;border:2px solid currentColor;border-radius:4px;box-sizing:border-box;display:inline-flex;align-items:center;padding:2px}.battery-symbol:after{content:'';position:absolute;right:-6px;top:5px;width:4px;height:9px;background:currentColor;border-radius:1px}.battery-fill{height:100%;border-radius:1px;background:currentColor}.battery-normal{color:#207b43}.battery-normal .battery-fill{width:100%}.battery-pre-warning{color:#946500}.battery-pre-warning .battery-fill{width:30%;background:#d5a000}.battery-exhausted{color:#b22222}.battery-unknown{color:#687582}.battery-exhausted .battery-fill,.battery-unknown .battery-fill{display:none}.battery-mark{font-weight:bold;width:100%;text-align:center;line-height:1}</style><main><h1>M-Bus målere</h1><p>Søk leser primæradressene 0–250. Målere med delt adresse kan ikke alltid skilles.</p>
+<style>html,body{margin:0;min-height:100%;background:#f7f9fb;color:#17212b;font:16px/1.5 system-ui,-apple-system,sans-serif}main{max-width:720px;margin:0 auto;padding:20px 16px 40px}h1{font-size:1.5rem;line-height:1.2;margin:0 0 8px}h2{font-size:1.15rem;margin:24px 0 8px}p{margin:8px 0}button{min-height:44px;max-width:100%;border:1px solid #8a9aaa;border-radius:8px;background:#e8f1fa;color:#152b3e;padding:8px 14px;font:inherit;margin:4px 4px 4px 0}button:disabled{opacity:.55}button:focus-visible{outline:3px solid #1266ab}.table-wrap{overflow-x:auto;background:#fff;border:1px solid #d0d9e1;border-radius:8px}table{border-collapse:collapse;width:100%;font:inherit}th,td{text-align:left;padding:8px;border-bottom:1px solid #d0d9e1;white-space:nowrap}#status{background:#fff;border:1px solid #d0d9e1;border-radius:8px;padding:12px}.meter{background:#fff;border:1px solid #d0d9e1;border-radius:8px;padding:12px;margin:8px 0;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;overflow-wrap:anywhere}details{margin:12px 0}summary{cursor:pointer;font-weight:600;padding:8px 0}#error{color:#a12020;overflow-wrap:anywhere}.active-diagnostics{width:100%;border-top:1px solid #d0d9e1;padding-top:8px}.battery-line{display:flex;align-items:center;gap:10px}.battery-symbol{width:48px;height:23px;position:relative;border:2px solid currentColor;border-radius:4px;box-sizing:border-box;display:inline-flex;align-items:center;padding:2px}.battery-symbol:after{content:'';position:absolute;right:-6px;top:5px;width:4px;height:9px;background:currentColor;border-radius:1px}.battery-fill{height:100%;border-radius:1px;background:currentColor}.battery-normal{color:#207b43}.battery-normal .battery-fill{width:100%}.battery-pre-warning{color:#946500}.battery-pre-warning .battery-fill{width:30%;background:#d5a000}.battery-exhausted{color:#b22222}.battery-unknown{color:#687582}.battery-exhausted .battery-fill,.battery-unknown .battery-fill{display:none}.battery-mark{font-weight:bold;width:100%;text-align:center;line-height:1}h3{font-size:1rem;margin:16px 0 4px}#address-panel{border-top:1px solid #d0d9e1;padding:8px 0}#address-target{box-sizing:border-box;width:6rem;max-width:100%;min-height:48px;font:600 1.5rem/1.2 system-ui,sans-serif;text-align:center;border:1px solid #8a9aaa;border-radius:8px;padding:6px;color:#17212b;background:white}#address-target:focus-visible{outline:3px solid #1266ab}.address-actions{display:flex;flex-wrap:wrap;align-items:center;gap:4px}.address-note,.export-note{font-size:.875rem;color:#526273}#address-results button{min-width:48px}#address-results button:disabled{opacity:1;cursor:not-allowed}#raw-status{font-size:.875rem}.export-block{border-top:1px solid #d0d9e1;padding:8px 0}</style><main><h1>M-Bus målere</h1><p>Søk leser primæradressene 0–250. Målere med delt adresse kan ikke alltid skilles.</p>
 <p>Initial readings are normally available within about 60 seconds. If the meter is in a confirmed historical telegram mode, automatic restoration of normal telegram mode may take about three minutes in total. Communication errors may extend this time. The minimum interval between commands is 60 seconds.</p><button id="scan">Søk etter målere</button><button id="auto">Velg eneste ledige automatisk</button>
 <h2>Tilgjengelige målere</h2><div id="available"></div>
 <h2>Etablerte målere</h2><div id="selected"></div><pre id="diagnostic-evidence" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre>
-<section id="protocol-diagnostic-panel" hidden><h2>Address protocol diagnostic (test)</h2><p>Isolated single-meter test only. Normal polling pauses for several minutes. No permanent meter parameter writes are authorized.</p><fieldset id="protocol-diagnostic-fields"><legend>Expected instrument identity</legend><p><label>Meter ID <input id="pd-id" inputmode="numeric" maxlength="8" pattern="[0-9]{8}"></label></p><p><label>Manufacturer <input id="pd-manufacturer" maxlength="3" pattern="[A-Z]{3}"></label></p><p><label>Version <input id="pd-version" type="number" min="0" max="254" step="1"></label> <label>Medium <input id="pd-medium" type="number" min="0" max="254" step="1"></label></p><p><label>Fabrication number <input id="pd-number" inputmode="numeric" maxlength="8" pattern="[0-9]{8}"></label></p><p><label>Current primary address <input id="pd-address" type="number" min="0" max="250" step="1"></label></p></fieldset><p><label><input id="pd-single" type="checkbox"> I confirm only one physical meter and one master are connected.</label></p><button id="pd-start" disabled>Run protocol test</button><button id="pd-recover" hidden disabled>Recover diagnostic session</button><p id="pd-status" role="status"></p><p id="pd-pending"></p><p><label>Evidence filename <input id="pd-file" maxlength="42" placeholder="UUID.jsonl"></label><button id="pd-download" disabled>Download private evidence</button></p></section><section id="quarantine-panel" hidden><h2>Address conflict recovery</h2><p>Normal bus operations are blocked until all affected instruments are verified. No response does not prove an address is free.</p><div id="quarantine-list"></div><p id="quarantine-status" role="status"></p></section><section id="address-recovery" hidden><h2>Address recovery</h2><p id="address-recovery-info" role="status"></p><p>Verify the physical address without repeating the address change.</p><button id="address-recover">Verify actual address</button></section><div id="address-panel-parking"><section id="address-panel" hidden><h2>Primary address</h2><button id="address-close">Close</button><p id="address-meter"></p><label for="address-target">New primary address (0–250)</label> <input id="address-target" type="number" min="0" max="250" step="1"><p><button id="address-check">Check address</button><button id="address-search">Search all addresses</button><button id="address-stop">Stop search</button></p><p id="address-progress" role="status"></p><div id="address-results"></div><p>No response does not guarantee availability. Counts refer to registered meters. Unanswered distinct primary addresses are probed at a minimum two-second interval, after the complete response window. Same-address retries and responses or uncertain communication retain the 60-second guard.</p><div id="address-write-panel" hidden><label><input type="checkbox" id="address-override" disabled> Accept displayed destination risk</label><p id="address-risk" role="status"></p><button id="address-change">Change address</button><p id="address-change-status" role="status"></p></div><p id="address-write-disabled">Address writing is not enabled in this build.</p></section></div><h2>Klokke</h2><p>Synkronisering bruker systemtid og valgt tidssone i Configuration. Manuell synkronisering krever bekreftelse; automatisk kontroll starter etter første gyldige måling ved oppstart eller nytt målervalg.</p><p id="clock-status"></p><h2>Analyse</h2><p>Last ned validerte normalavlesninger og lagret månedshistorikk som Excel-fil. Nedlasting leser lagrede data og sender ingen kommando til måleren. Historikk hentes separat med knappen ved den valgte måleren.</p><p>Measurement data logging is controlled separately in Configuration. Disabling capture keeps existing files and history.</p><button id="export">Last ned analyse (.xlsx)</button>
-<h2>Lagret månedshistorikk</h2><p>First installation: leave all optional switches off and verify ordinary live measurements before enabling additional functions. Initial retrieval reads frames 2 and 3. Subsequent manual retrieval reads missing extended months (frame 4); allow about four minutes per month. The table shows progress for the current job. Regular polling pauses; live values may be stale or temporarily unavailable. Clock synchronization and scanning also respect the interval. Downloads use saved data and do not query the meter.</p><p>Positions indicate the order in the meter archive. A dash means no retrieval has been started in this session. Saved energy values remain visible while extended data is being read.</p><div id="history"></div><h2>Raw telegram diagnostics</h2><p>Local capture may contain meter identifiers and consumption. Enable raw capture in Configuration; restart the app to apply. No extra bus requests.</p><p id="raw-status"></p><button id="raw-download">Download raw text (.txt)</button><p id="status"></p><p id="error" role="alert"></p>
+<section id="protocol-diagnostic-panel" hidden><h2>Address protocol diagnostic (test)</h2><p>Isolated single-meter test only. Normal polling pauses for several minutes. No permanent meter parameter writes are authorized.</p><fieldset id="protocol-diagnostic-fields"><legend>Expected instrument identity</legend><p><label>Meter ID <input id="pd-id" inputmode="numeric" maxlength="8" pattern="[0-9]{8}"></label></p><p><label>Manufacturer <input id="pd-manufacturer" maxlength="3" pattern="[A-Z]{3}"></label></p><p><label>Version <input id="pd-version" type="number" min="0" max="254" step="1"></label> <label>Medium <input id="pd-medium" type="number" min="0" max="254" step="1"></label></p><p><label>Fabrication number <input id="pd-number" inputmode="numeric" maxlength="8" pattern="[0-9]{8}"></label></p><p><label>Current primary address <input id="pd-address" type="number" min="0" max="250" step="1"></label></p></fieldset><p><label><input id="pd-single" type="checkbox"> I confirm only one physical meter and one master are connected.</label></p><button id="pd-start" disabled>Run protocol test</button><button id="pd-recover" hidden disabled>Recover diagnostic session</button><p id="pd-status" role="status"></p><p id="pd-pending"></p><p><label>Evidence filename <input id="pd-file" maxlength="42" placeholder="UUID.jsonl"></label><button id="pd-download" disabled>Download private evidence</button></p></section><section id="quarantine-panel" hidden><h2>Address conflict recovery</h2><p>Normal bus operations are blocked until all affected instruments are verified. No response does not prove an address is free.</p><div id="quarantine-list"></div><p id="quarantine-status" role="status"></p></section><section id="address-recovery" hidden><h2>Address recovery</h2><p id="address-recovery-info" role="status"></p><p>Verify the physical address without repeating the address change.</p><button id="address-recover">Verify actual address</button></section><div id="address-panel-parking"><section id="address-panel" hidden><h2>Primary address</h2><button id="address-close">Close</button><p id="address-meter"></p><label for="address-target">New address (0–250)</label><div class="address-actions"><input id="address-target" type="text" inputmode="numeric" maxlength="3" pattern="[0-9]{1,3}" required><button id="address-check">Check address</button></div><h3>Address search</h3><div class="address-actions"><button id="address-search">New search</button><button id="address-resume" disabled>Resume</button><button id="address-stop">Stop</button></div><p id="address-progress" role="status"></p><div id="address-results"></div><p class="address-note">Green: available candidate. Yellow: conflict risk. Red: not selectable. No response does not guarantee availability. Counts refer to registered meters.</p><details class="address-note"><summary>Search timing</summary>Unanswered distinct addresses: minimum 2 seconds. Repeated addresses, responses and uncertain exchanges: 60-second guard.</details><div id="address-write-panel" hidden><label><input type="checkbox" id="address-override" disabled> Accept displayed destination risk</label><p id="address-risk" role="status"></p><button id="address-change">Change address</button><p id="address-change-status" role="status"></p></div><p id="address-write-disabled">Address writing is not enabled in this build.</p></section></div><h2>Klokke</h2><p>Synkronisering bruker systemtid og valgt tidssone i Configuration. Manuell synkronisering krever bekreftelse; automatisk kontroll starter etter første gyldige måling ved oppstart eller nytt målervalg.</p><p id="clock-status"></p>
+<h2>Lagret månedshistorikk</h2><p>First installation: leave all optional switches off and verify ordinary live measurements before enabling additional functions. Initial retrieval reads frames 2 and 3. Subsequent manual retrieval reads missing extended months (frame 4); allow about four minutes per month. The table shows progress for the current job. Regular polling pauses; live values may be stale or temporarily unavailable. Clock synchronization and scanning also respect the interval. Downloads use saved data and do not query the meter.</p><p>Positions indicate the order in the meter archive. A dash means no retrieval has been started in this session. Saved energy values remain visible while extended data is being read.</p><div id="history"></div><section id="data-export"><h2>Data export</h2><div class="export-block"><h3>Measurement data</h3><p class="export-note">Export stored measurements and monthly history. Logging is controlled in Configuration.</p><button id="export">Download Excel (.xlsx)</button></div><div class="export-block"><h3>Raw telegrams</h3><p class="export-note">Enable capture in Configuration and restart. May contain private meter data.</p><p id="raw-status" role="status"></p><button id="raw-download">Download raw text (.txt)</button></div></section><p id="status"></p><p id="error" role="alert"></p>
 </main><script>
 const root = location.pathname.replace(/\/$/, '');
 let refreshing = false;
@@ -71,7 +71,7 @@ function renderQuarantine(rows,enabled) {
     const action=async(kind)=>{
       if(blocked||quarantineSubmitting||addressChangeBusy||quarantineRecoveryPending) return;
       const target=kind==='relocate'?Number(input.value):null;
-      if(kind==='relocate' && (!input.value || !input.checkValidity() || target===row.address)) return;
+      if(kind==='relocate' && (!validAddressInput(input) || target===row.address)) return;
       if(!confirm(kind+' instrument '+row.meter_id+' at '+addressFormat(row.address)+(target===null?'':' to '+addressFormat(target))+'?')) return;
       quarantineSubmitting=true;
       renderQuarantine(quarantineRows,quarantineEnabled);
@@ -108,7 +108,17 @@ function updateAddressHeader() {
 let recoveryJob = null;
 let addressView = '';
 let addressJob = null;
-const addressLabels = {current_address:'Current address',current_address_conflict:'Current address – conflict',occupied:'Occupied',occupied_multiple:'Occupied – multiple meters',ambiguous:'Ambiguous response – possible collision',no_response:'No response',failed:'Check failed'};
+const addressLabels = {current_address:'Current address',current_address_conflict:'Current address – conflict',occupied:'Occupied',occupied_multiple:'Occupied – multiple meters',ambiguous:'Possible address conflict',no_response:'Available (no response)',failed:'Check failed'};
+function addressChoice(status) {
+  if(status==='no_response') return {selectable:true,bg:'#dcfce7',fg:'#166534'};
+  if(['occupied','occupied_multiple','ambiguous'].includes(status)) return {selectable:true,bg:'#fef3c7',fg:'#92400e'};
+  if(status==='current_address') return {selectable:false,bg:'#f1f5f9',fg:'#475569'};
+  return {selectable:false,bg:'#fee2e2',fg:'#991b1b'};
+}
+function styleAddressChoice(element,choice) {
+  element.style.backgroundColor=choice.bg;
+  element.style.color=choice.fg;
+}
 function groupAddressRows(rows) {
   const groups = [];
   for (const row of [...rows].sort((a,b)=>a.address-b.address)) {
@@ -128,6 +138,7 @@ function renderAddressJob(job) {
   document.getElementById('address-search').disabled = running;
   document.getElementById('address-stop').disabled = !matching || job.status !== 'running';
   document.getElementById('address-close').disabled = running;
+  document.getElementById('address-resume').disabled = !matching || job.can_resume !== true || running;
   document.getElementById('address-progress').textContent = matching ? job.status+' – '+job.results.length+'/'+job.total : '';
   const area = document.getElementById('address-results');
   const stale=job.search_id!=null && job.search_id===invalidatedSearch;
@@ -141,15 +152,24 @@ function renderAddressJob(job) {
   const choose = n => {document.getElementById('address-target').value=String(n); document.getElementById('address-override').checked=false; syncRisk();};
   for (const g of groupAddressRows(rows)) {
     const label = (addressLabels[g.status] || g.status) + (g.count>1 ? ' ('+g.count+')' : '');
+    const choice=addressChoice(g.status);
+    const candidateButton=(label,n)=>{
+      const candidate=button(label,()=>{if(choice.selectable) choose(n);},!choice.selectable);
+      styleAddressChoice(candidate,choice);
+      return candidate;
+    };
     if (g.start === g.end) {
-      area.append(button(addressFormat(g.start)+' — '+label,()=>choose(g.start)));
+      area.append(candidateButton(addressFormat(g.start)+' — '+label,g.start));
     } else {
       const details=document.createElement('details'); details.dataset.start=String(g.start);
       details.open=opened.has(details.dataset.start);
       const summary=document.createElement('summary');
       summary.textContent=addressFormat(g.start)+'–'+addressFormat(g.end)+' — '+label;
+      styleAddressChoice(summary,choice);
       details.append(summary);
-      for(let n=g.start;n<=g.end;n++) details.append(button(addressFormat(n),()=>choose(n)));
+      for(let n=g.start;n<=g.end;n++) {
+        details.append(candidateButton(addressFormat(n),n));
+      }
       area.append(details);
     }
   }
@@ -203,6 +223,7 @@ function renderAddressChange(state) {
   if(addressChangeBusy||recovery||quarantined) {
     document.getElementById('address-check').disabled=true;
     document.getElementById('address-search').disabled=true;
+    document.getElementById('address-resume').disabled=true;
   }
   const labels={running:'Changing and verifying address…',verified_new:'New address verified',verified_old:'Old address verified; change not confirmed',unchanged:'Address unchanged',override_required:'Destination risk requires explicit confirmation',identity_blocked:'Instrument identity not verified',recovery_required:'Recovery required; do not retry'};
   document.getElementById('address-change-status').textContent=job?.meter_id===addressMeter?(labels[job.status]||job.status):'';
@@ -214,10 +235,11 @@ document.getElementById('address-recover').onclick=async()=>{
   try {await call('/api/address_recover',{meter_id:pending.meter_id,transaction_id:pending.transaction_id,confirm:true}); await refresh();}
   catch(e){document.getElementById('error').textContent=e.message;}
 };
-document.getElementById('address-target').oninput=()=>{document.getElementById('address-override').checked=false; syncRisk();};
+function validAddressInput(input) {return /^[0-9]{1,3}$/.test(input.value) && Number(input.value)<=250 && input.checkValidity();}
+document.getElementById('address-target').oninput=()=>{const input=document.getElementById('address-target'); input.value=input.value.replace(/[^0-9]/g,'').slice(0,3); document.getElementById('address-override').checked=false; syncRisk();};
 document.getElementById('address-change').onclick=async()=>{
   const input=document.getElementById('address-target');
-  if(!addressChangeEnabled||addressChangeBusy||quarantineRows.length||quarantineRecoveryPending||!addressMeter||!input.value||!input.checkValidity()) return;
+  if(!addressChangeEnabled||addressChangeBusy||quarantineRows.length||quarantineRecoveryPending||!addressMeter||!validAddressInput(input)) return;
   const target=Number(input.value), override=document.getElementById('address-override').checked;
   if(target===addressOld || (override && !displayedRisk)) return;
   if(!confirm('Change meter '+addressMeter+' from '+addressFormat(addressOld)+' to '+addressFormat(target)+'? The destination will be checked again. '+(override?'You explicitly accept destination conflict or uncertainty.':'Conflicting or uncertain destinations will stop the operation.'))) return;
@@ -226,12 +248,13 @@ document.getElementById('address-change').onclick=async()=>{
   try {await call('/api/address_change',{meter_id:addressMeter,old_address:addressOld,new_address:target,confirm:true,override,accepted_risk:override?displayedRisk:null}); await refresh();}
   catch(e){document.getElementById('error').textContent=e.message;}
 };
-async function addressAction(route, all=false) {
+async function addressAction(route, all=false, resume=false) {
   if(!addressMeter || (route!=='address_stop' && (addressChangeBusy||quarantineRecoveryPending||quarantineRows.length))) return;
   const input=document.getElementById('address-target');
-  if(route!=='address_stop' && !all && (!input.value || !input.checkValidity())) return;
+  if(route!=='address_stop' && !all && (!validAddressInput(input))) return;
+  if(all && !resume && addressJob?.meter_id===addressMeter && addressJob.can_resume && !confirm('Start a new search and discard previous results?')) return;
   const value=Number(input.value);
-  const body=route==='address_stop'?{meter_id:addressMeter}:{meter_id:addressMeter,first:all?0:value,last:all?250:value};
+  const body=route==='address_stop'?{meter_id:addressMeter}:{meter_id:addressMeter,first:all?0:value,last:all?250:value,...(resume?{resume:true}:{})};
   try { await call('/api/'+route,body); await refresh(); }
   catch(e) { document.getElementById('error').textContent=e.message; }
 }
@@ -245,6 +268,7 @@ document.getElementById('address-close').onclick=()=>{
 document.getElementById('address-check').onclick=()=>addressAction('address_search');
 document.getElementById('address-search').onclick=()=>addressAction('address_search',true);
 document.getElementById('address-stop').onclick=()=>addressAction('address_stop');
+document.getElementById('address-resume').onclick=()=>addressAction('address_search',true,true);
 function addCell(row, value, heading=false) {
   const cell = document.createElement(heading ? 'th' : 'td');
   cell.textContent = String(value ?? '');
@@ -394,7 +418,7 @@ async function refresh() {
     // Address progress is refreshed independently of registry-backed views.
     if (state.raw_log) {
       const r=state.raw_log;
-      document.getElementById('raw-status').textContent = 'Capture: '+(r.enabled?'On':'Off')+'; queued: '+r.queued+'; dropped: '+r.dropped+'; rotations: '+r.rotations+'; storage error: '+r.storage_error;
+      document.getElementById('raw-status').textContent = 'Capture: '+(r.enabled?'On':'Off')+'; queued: '+r.queued+'; dropped: '+r.dropped+'; rotations: '+r.rotations+(r.storage_error?' · Storage error':'');
     }
     document.getElementById('status').textContent =
       `Søk: ${localText(state.scan_status)}, adresser sjekket: ${state.scan_progress}/251, ` +
@@ -461,12 +485,7 @@ async function refresh() {
             line.append(capture, status, evidence, output);
             if (captureEvidenceVisible) evidence.click();
           }
-          const dstState = (state.dst_diagnostics || {})[item.meter_id] || {};
-          const diagnostic = document.createElement('p');
           const flag = value => localText(value === true ? 'DST_ACTIVE' : value === false ? 'DST_INACTIVE' : 'DST_UNKNOWN');
-          diagnostic.textContent = localText('DST_TRANSITION_FAILED') + ': ' + flag(dstState.dst_transition_failed) +
-            '; ' + localText('DST_CLOCK_OVERRIDE') + ': ' + flag(dstState.dst_clock_override);
-          line.append(diagnostic);
           const alarm = (state.monthly_alarms || {})[item.meter_id] || {};
           const historyAlarm = document.createElement("p");
           historyAlarm.textContent = "Monthly history failed: " + flag(alarm.active);
@@ -956,7 +975,10 @@ def serve(registry, config, client, bus_lock, stop, port=8099, history_controlle
                 else:
                     if history_controller.blocked.is_set() or history_controller.snapshot()["status"] == "running" or clock_controller.snapshot()["status"] == "running" or capture_running():
                         raise ValueError("bus unavailable")
-                    address_search_job.start(meter_id, data.get("first"), data.get("last"))
+                    if "resume" in data:
+                        address_search_job.start(meter_id, data.get("first"), data.get("last"), resume=data["resume"])
+                    else:
+                        address_search_job.start(meter_id, data.get("first"), data.get("last"))
                 self._send(202, address_search_job.snapshot())
                 return
             if route == "stop_history":
