@@ -21,16 +21,17 @@ from zoneinfo import ZoneInfo
 
 
 PAGE = r"""<!doctype html><html lang="no"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>M-Bus målere</title>
-<style>html,body{margin:0;min-height:100%;background:#f7f9fb;color:#17212b;font:16px/1.5 system-ui,-apple-system,sans-serif}main{max-width:720px;margin:0 auto;padding:20px 16px 40px}h1{font-size:1.5rem;line-height:1.2;margin:0 0 8px}h2{font-size:1.15rem;margin:24px 0 8px}p{margin:8px 0}button{min-height:44px;max-width:100%;border:1px solid #8a9aaa;border-radius:8px;background:#e8f1fa;color:#152b3e;padding:8px 14px;font:inherit;margin:4px 4px 4px 0}button:disabled{opacity:.55}button:focus-visible{outline:3px solid #1266ab}.table-wrap{overflow-x:auto;background:#fff;border:1px solid #d0d9e1;border-radius:8px}table{border-collapse:collapse;width:100%;font:inherit}th,td{text-align:left;padding:8px;border-bottom:1px solid #d0d9e1;white-space:nowrap}#status{background:#fff;border:1px solid #d0d9e1;border-radius:8px;padding:12px}.meter{background:#fff;border:1px solid #d0d9e1;border-radius:8px;padding:12px;margin:8px 0;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;overflow-wrap:anywhere}details{margin:12px 0}summary{cursor:pointer;font-weight:600;padding:8px 0}#error{color:#a12020;overflow-wrap:anywhere}.active-diagnostics{width:100%;border-top:1px solid #d0d9e1;padding-top:8px}.battery-line{display:flex;align-items:center;gap:10px}.battery-symbol{width:48px;height:23px;position:relative;border:2px solid currentColor;border-radius:4px;box-sizing:border-box;display:inline-flex;align-items:center;padding:2px}.battery-symbol:after{content:'';position:absolute;right:-6px;top:5px;width:4px;height:9px;background:currentColor;border-radius:1px}.battery-fill{height:100%;border-radius:1px;background:currentColor}.battery-normal{color:#207b43}.battery-normal .battery-fill{width:100%}.battery-pre-warning{color:#946500}.battery-pre-warning .battery-fill{width:30%;background:#d5a000}.battery-exhausted{color:#b22222}.battery-unknown{color:#687582}.battery-exhausted .battery-fill,.battery-unknown .battery-fill{display:none}.battery-mark{font-weight:bold;width:100%;text-align:center;line-height:1}h3{font-size:1rem;margin:16px 0 4px}#address-panel{border-top:1px solid #d0d9e1;padding:8px 0}#address-target{box-sizing:border-box;width:6rem;max-width:100%;min-height:48px;font:600 1.5rem/1.2 system-ui,sans-serif;text-align:center;border:1px solid #8a9aaa;border-radius:8px;padding:6px;color:#17212b;background:white}#address-target:focus-visible{outline:3px solid #1266ab}.address-actions{display:flex;flex-wrap:wrap;align-items:center;gap:4px}.address-note,.export-note{font-size:.875rem;color:#526273}#address-results button{min-width:48px}#address-results button:disabled{opacity:1;cursor:not-allowed}#raw-status{font-size:.875rem}.export-block{border-top:1px solid #d0d9e1;padding:8px 0}</style><main><h1>M-Bus målere</h1><p>Søk leser primæradressene 0–250. Målere med delt adresse kan ikke alltid skilles.</p>
+<style>html,body{margin:0;min-height:100%;background:#f7f9fb;color:#17212b;font:16px/1.5 system-ui,-apple-system,sans-serif}main{max-width:720px;margin:0 auto;padding:20px 16px 40px}h1{font-size:1.5rem;line-height:1.2;margin:0 0 8px}h2{font-size:1.15rem;margin:24px 0 8px}p{margin:8px 0}button{min-height:44px;max-width:100%;border:1px solid #8a9aaa;border-radius:8px;background:#e8f1fa;color:#152b3e;padding:8px 14px;font:inherit;margin:4px 4px 4px 0}button:disabled{opacity:.55}button:focus-visible{outline:3px solid #1266ab}.table-wrap{overflow-x:auto;background:#fff;border:1px solid #d0d9e1;border-radius:8px}table{border-collapse:collapse;width:100%;font:inherit}th,td{text-align:left;padding:8px;border-bottom:1px solid #d0d9e1;white-space:nowrap}#status{background:#fff;border:1px solid #d0d9e1;border-radius:8px;padding:12px}.meter{background:#fff;border:1px solid #d0d9e1;border-radius:8px;padding:12px;margin:8px 0;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;overflow-wrap:anywhere}details{margin:12px 0}summary{cursor:pointer;font-weight:600;padding:8px 0}#error{color:#a12020;overflow-wrap:anywhere}.active-diagnostics{width:100%;border-top:1px solid #d0d9e1;padding-top:8px}.battery-line{display:flex;align-items:center;gap:10px}.battery-symbol{width:48px;height:23px;position:relative;border:2px solid currentColor;border-radius:4px;box-sizing:border-box;display:inline-flex;align-items:center;padding:2px}.battery-symbol:after{content:'';position:absolute;right:-6px;top:5px;width:4px;height:9px;background:currentColor;border-radius:1px}.battery-fill{height:100%;border-radius:1px;background:currentColor}.battery-normal{color:#207b43}.battery-normal .battery-fill{width:100%}.battery-pre-warning{color:#946500}.battery-pre-warning .battery-fill{width:30%;background:#d5a000}.battery-exhausted{color:#b22222}.battery-unknown{color:#687582}.battery-exhausted .battery-fill,.battery-unknown .battery-fill{display:none}.battery-mark{font-weight:bold;width:100%;text-align:center;line-height:1}h3{font-size:1rem;margin:16px 0 4px}#address-panel{border-top:1px solid #d0d9e1;padding:8px 0}#address-target{box-sizing:border-box;width:6rem;max-width:100%;min-height:48px;font:600 1.5rem/1.2 system-ui,sans-serif;text-align:center;border:1px solid #8a9aaa;border-radius:8px;padding:6px;color:#17212b;background:white}#address-target:focus-visible{outline:3px solid #1266ab}.address-actions{display:flex;flex-wrap:wrap;align-items:center;gap:4px}.address-note,.export-note{font-size:.875rem;color:#526273}#address-results button{min-width:48px}#address-results button:disabled{opacity:1;cursor:not-allowed}#raw-status{font-size:.875rem}.export-block{border-top:1px solid #d0d9e1;padding:8px 0} .diagnostic-details{margin:8px 0}.diagnostic-details p{margin:4px 0}.diagnostic-warning{color:#92400e;font-weight:600}.meter-actions{width:100%;display:flex;flex-wrap:wrap;gap:4px;align-items:center}.meter-actions-title{width:100%;font-weight:600}.migration-status{width:100%;color:#166534;font-size:.875rem}.table-wrap th{white-space:normal;line-height:1.2;font-size:.875rem}.table-wrap td{font-variant-numeric:tabular-nums}.table-wrap th,.table-wrap td{padding:7px 6px}.help-details{font-size:.875rem;color:#526273}.diagnostic-stamp{font-size:.875rem;color:#526273}.meter-admin{width:100%;border-top:1px solid #d0d9e1;padding-top:8px}</style><main><h1>M-Bus målere</h1><p>Søk leser primæradressene 0–250. Målere med delt adresse kan ikke alltid skilles.</p>
 <p>Initial readings are normally available within about 60 seconds. If the meter is in a confirmed historical telegram mode, automatic restoration of normal telegram mode may take about three minutes in total. Communication errors may extend this time. The minimum interval between commands is 60 seconds.</p><button id="scan">Søk etter målere</button><button id="auto">Velg eneste ledige automatisk</button>
 <h2>Tilgjengelige målere</h2><div id="available"></div>
 <h2>Etablerte målere</h2><div id="selected"></div><pre id="diagnostic-evidence" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre>
-<section id="protocol-diagnostic-panel" hidden><h2>Address protocol diagnostic (test)</h2><p>Isolated single-meter test only. Normal polling pauses for several minutes. No permanent meter parameter writes are authorized.</p><fieldset id="protocol-diagnostic-fields"><legend>Expected instrument identity</legend><p><label>Meter ID <input id="pd-id" inputmode="numeric" maxlength="8" pattern="[0-9]{8}"></label></p><p><label>Manufacturer <input id="pd-manufacturer" maxlength="3" pattern="[A-Z]{3}"></label></p><p><label>Version <input id="pd-version" type="number" min="0" max="254" step="1"></label> <label>Medium <input id="pd-medium" type="number" min="0" max="254" step="1"></label></p><p><label>Fabrication number <input id="pd-number" inputmode="numeric" maxlength="8" pattern="[0-9]{8}"></label></p><p><label>Current primary address <input id="pd-address" type="number" min="0" max="250" step="1"></label></p></fieldset><p><label><input id="pd-single" type="checkbox"> I confirm only one physical meter and one master are connected.</label></p><button id="pd-start" disabled>Run protocol test</button><button id="pd-recover" hidden disabled>Recover diagnostic session</button><p id="pd-status" role="status"></p><p id="pd-pending"></p><p><label>Evidence filename <input id="pd-file" maxlength="42" placeholder="UUID.jsonl"></label><button id="pd-download" disabled>Download private evidence</button></p></section><section id="quarantine-panel" hidden><h2>Address conflict recovery</h2><p>Normal bus operations are blocked until all affected instruments are verified. No response does not prove an address is free.</p><div id="quarantine-list"></div><p id="quarantine-status" role="status"></p></section><section id="address-recovery" hidden><h2>Address recovery</h2><p id="address-recovery-info" role="status"></p><p>Verify the physical address without repeating the address change.</p><button id="address-recover">Verify actual address</button></section><div id="address-panel-parking"><section id="address-panel" hidden><h2>Primary address</h2><button id="address-close">Close</button><p id="address-meter"></p><label for="address-target">New address (0–250)</label><div class="address-actions"><input id="address-target" type="text" inputmode="numeric" maxlength="3" pattern="[0-9]{1,3}" required><button id="address-check">Check address</button></div><h3>Address search</h3><div class="address-actions"><button id="address-search">New search</button><button id="address-resume" disabled>Resume</button><button id="address-stop">Stop</button></div><p id="address-progress" role="status"></p><div id="address-results"></div><p class="address-note">Green: available candidate. Yellow: conflict risk. Red: not selectable. No response does not guarantee availability. Counts refer to registered meters.</p><details class="address-note"><summary>Search timing</summary>Unanswered distinct addresses: minimum 2 seconds. Repeated addresses, responses and uncertain exchanges: 60-second guard.</details><div id="address-write-panel" hidden><label><input type="checkbox" id="address-override" disabled> Accept displayed destination risk</label><p id="address-risk" role="status"></p><button id="address-change">Change address</button><p id="address-change-status" role="status"></p></div><p id="address-write-disabled">Address writing is not enabled in this build.</p></section></div><h2>Klokke</h2><p>Synkronisering bruker systemtid og valgt tidssone i Configuration. Manuell synkronisering krever bekreftelse; automatisk kontroll starter etter første gyldige måling ved oppstart eller nytt målervalg.</p><p id="clock-status"></p>
-<h2>Lagret månedshistorikk</h2><p>First installation: leave all optional switches off and verify ordinary live measurements before enabling additional functions. Initial retrieval reads frames 2 and 3. Subsequent manual retrieval reads missing extended months (frame 4); allow about four minutes per month. The table shows progress for the current job. Regular polling pauses; live values may be stale or temporarily unavailable. Clock synchronization and scanning also respect the interval. Downloads use saved data and do not query the meter.</p><p>Positions indicate the order in the meter archive. A dash means no retrieval has been started in this session. Saved energy values remain visible while extended data is being read.</p><div id="history"></div><section id="data-export"><h2>Data export</h2><div class="export-block"><h3>Measurement data</h3><p class="export-note">Export stored measurements and monthly history. Logging is controlled in Configuration.</p><button id="export">Download Excel (.xlsx)</button></div><div class="export-block"><h3>Raw telegrams</h3><p class="export-note">Enable capture in Configuration and restart. May contain private meter data.</p><p id="raw-status" role="status"></p><button id="raw-download">Download raw text (.txt)</button></div></section><p id="status"></p><p id="error" role="alert"></p>
+<section id="protocol-diagnostic-panel" hidden><h2>Address protocol diagnostic (test)</h2><p>Isolated single-meter test only. Normal polling pauses for several minutes. No permanent meter parameter writes are authorized.</p><fieldset id="protocol-diagnostic-fields"><legend>Expected instrument identity</legend><p><label>Meter ID <input id="pd-id" inputmode="numeric" maxlength="8" pattern="[0-9]{8}"></label></p><p><label>Manufacturer <input id="pd-manufacturer" maxlength="3" pattern="[A-Z]{3}"></label></p><p><label>Version <input id="pd-version" type="number" min="0" max="254" step="1"></label> <label>Medium <input id="pd-medium" type="number" min="0" max="254" step="1"></label></p><p><label>Fabrication number <input id="pd-number" inputmode="numeric" maxlength="8" pattern="[0-9]{8}"></label></p><p><label>Current primary address <input id="pd-address" type="number" min="0" max="250" step="1"></label></p></fieldset><p><label><input id="pd-single" type="checkbox"> I confirm only one physical meter and one master are connected.</label></p><button id="pd-start" disabled>Run protocol test</button><button id="pd-recover" hidden disabled>Recover diagnostic session</button><p id="pd-status" role="status"></p><p id="pd-pending"></p><p><label>Evidence filename <input id="pd-file" maxlength="42" placeholder="UUID.jsonl"></label><button id="pd-download" disabled>Download private evidence</button></p></section><section id="quarantine-panel" hidden><h2>Address conflict recovery</h2><p>Normal bus operations are blocked until all affected instruments are verified. No response does not prove an address is free.</p><div id="quarantine-list"></div><p id="quarantine-status" role="status"></p></section><section id="address-recovery" hidden><h2>Address recovery</h2><p id="address-recovery-info" role="status"></p><p>Verify the physical address without repeating the address change.</p><button id="address-recover">Verify actual address</button></section><div id="address-panel-parking"><section id="address-panel" hidden><h2>Primary address</h2><button id="address-close">Close</button><p id="address-meter"></p><label for="address-target">New address (0–250)</label><div class="address-actions"><input id="address-target" type="text" inputmode="numeric" maxlength="3" pattern="[0-9]{1,3}" required><button id="address-check">Check address</button></div><h3>Address search</h3><div class="address-actions"><button id="address-search">New search</button><button id="address-resume" disabled>Resume</button><button id="address-stop">Stop</button></div><p id="address-progress" role="status"></p><div id="address-results"></div><p class="address-note">Green: available candidate. Yellow: conflict risk. Red: not selectable. No response does not guarantee availability. Counts refer to registered meters.</p><details class="address-note"><summary>Search timing</summary>Unanswered distinct addresses: minimum 2 seconds. Repeated addresses, responses and uncertain exchanges: 60-second guard.</details><div id="address-write-panel" hidden><label><input type="checkbox" id="address-override" disabled> Accept displayed destination risk</label><p id="address-risk" role="status"></p><button id="address-change">Change address</button><p id="address-change-status" role="status"></p></div><p id="address-write-disabled">Address writing is not enabled in this build.</p></section></div><h2>Klokke</h2><p id="clock-status"></p><details class="help-details"><summary>More information</summary><p>Synkronisering bruker systemtid og valgt tidssone i Configuration. Manuell synkronisering krever bekreftelse; automatisk kontroll starter etter første gyldige måling ved oppstart eller nytt målervalg.</p></details>
+<h2>Lagret månedshistorikk</h2><p>Retrieval may pause live readings. Allow about four minutes per missing extended month.</p><details class="help-details"><summary>More information</summary><p>First installation: leave all optional switches off and verify ordinary live measurements before enabling additional functions. Initial retrieval reads frames 2 and 3. Subsequent manual retrieval reads missing extended months (frame 4); allow about four minutes per month. The table shows progress for the current job. Regular polling pauses; live values may be stale or temporarily unavailable. Clock synchronization and scanning also respect the interval. Downloads use saved data and do not query the meter.</p><p>Positions indicate the order in the meter archive. A dash means no retrieval has been started in this session. Saved energy values remain visible while extended data is being read.</p></details><div id="history"></div><section id="data-export"><h2>Data export</h2><div class="export-block"><h3>Measurement data</h3><p class="export-note">Export stored measurements and monthly history. Logging is controlled in Configuration.</p><button id="export">Download Excel (.xlsx)</button></div><div class="export-block"><h3>Raw telegrams</h3><p class="export-note">Enable capture in Configuration and restart. May contain private meter data.</p><p id="raw-status" role="status"></p><button id="raw-download">Download raw text (.txt)</button></div></section><p id="status"></p><p id="error" role="alert"></p>
 </main><script>
 const root = location.pathname.replace(/\/$/, '');
 let refreshing = false;
 let lastLists = '';
+const diagnosticOpen = new Map();
 let captureEvidenceVisible = false;
 let lastHistoryCapture = null;
 let lastArchiveRevision = -1;
@@ -269,6 +270,10 @@ document.getElementById('address-check').onclick=()=>addressAction('address_sear
 document.getElementById('address-search').onclick=()=>addressAction('address_search',true);
 document.getElementById('address-stop').onclick=()=>addressAction('address_stop');
 document.getElementById('address-resume').onclick=()=>addressAction('address_search',true,true);
+function displayTimestamp(value) {
+  if(typeof value!=='string') return value ?? '—';
+  return value.replace(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})(:\d{2})?(?:\.\d+)?(Z|[+-]\d{2}:\d{2})?$/,(_,date,hm,seconds,zone)=>date+' '+hm+(seconds||'')+(zone==='Z'||zone==='+00:00'?' UTC':zone?' '+zone:''));
+}
 function addCell(row, value, heading=false) {
   const cell = document.createElement(heading ? 'th' : 'td');
   cell.textContent = String(value ?? '');
@@ -278,6 +283,7 @@ async function refreshHistory() {
   const data = await call('/api/history');
   const area = document.getElementById('history');
   const previousOpen = new Map(Array.from(area.querySelectorAll('details[data-meter]'), d => [d.dataset.meter, d.open]));
+  const previousErrors = new Map(Array.from(area.querySelectorAll('details[data-error-meter]'), d => [d.dataset.errorMeter,d.open]));
   area.replaceChildren();
   if (!data.histories.length) { area.textContent = 'Ingen lagret månedshistorikk.'; return; }
   for (const entry of data.histories) {
@@ -293,17 +299,21 @@ async function refreshHistory() {
     details.append(evidence);
     const errors = entry.snapshot.error_history;
     if (errors) {
+      const errorDetails=document.createElement("details"); errorDetails.dataset.errorMeter=entry.alias;
+      errorDetails.open=previousErrors.get(entry.alias) ?? false;
+      const summary=document.createElement("summary"); summary.textContent="Error history"; errorDetails.append(summary);
       const label = document.createElement("p");
-      label.textContent = localText("ERROR_HISTORY_TITLE") + ": " + (errors.read_at_utc ?? "—");
-      details.append(label);
+      label.textContent = localText("ERROR_HISTORY_TITLE") + ": " + displayTimestamp(errors.read_at_utc);
+      errorDetails.append(label);
       const list = document.createElement("p");
-      list.textContent = Object.entries({"FT":"Last Negative Temperature Difference (FT)","FF2":"Last Reverse Flow (FF2)","FS":"Last Sensor Error (FS)","FE":"Last Electronic Error (FE)","FF1":"Last Flow Rate Error (FF1)"}).map(([code,label]) => label + ": " + (errors.last_occurrence_local?.[code] ?? "—")).join("; ");
-      details.append(list);
-      const note = document.createElement("p"); note.textContent = localText("ERROR_HISTORY_NOTE"); details.append(note);
+      list.textContent = Object.entries({"FT":"Last Negative Temperature Difference (FT)","FF2":"Last Reverse Flow (FF2)","FS":"Last Sensor Error (FS)","FE":"Last Electronic Error (FE)","FF1":"Last Flow Rate Error (FF1)"}).map(([code,label]) => label + ": " + displayTimestamp(errors.last_occurrence_local?.[code])).join("; ");
+      errorDetails.append(list);
+      const note = document.createElement("p"); note.textContent = localText("ERROR_HISTORY_NOTE"); errorDetails.append(note);
+      details.append(errorDetails);
     }
     const wrap = document.createElement('div'); wrap.className = 'table-wrap';
     const table = document.createElement('table'); const head = document.createElement('tr');
-    for (const label of ['Posisjon', 'Målerstand (kWh)', 'Forbruk siden neste eldre stand (kWh)', 'Status']) addCell(head, label, true);
+    for (const label of ['Pos.', 'Reading (kWh)', 'Usage (kWh)', 'Status']) addCell(head, label, true);
     table.append(head);
     const periods = new Map(entry.snapshot.bounded_periods.map(p => [p.newer_storage, p.period_kwh]));
     const progress = {...entry.stored_progress, ...(data.archive_alias === entry.alias ? data.archive_progress : {})};
@@ -335,7 +345,7 @@ async function call(path, body) {
 function button(label, handler, disabled=false) {
   const b = document.createElement('button'); b.textContent = label; b.onclick = handler; b.disabled = disabled; return b;
 }
-function renderActiveDiagnostics(data) {
+function renderActiveDiagnostics(data, meterId) {
   const section = document.createElement('section');
   section.className = 'active-diagnostics';
   const title = document.createElement('strong');
@@ -376,26 +386,40 @@ function renderActiveDiagnostics(data) {
   const flow = document.createElement('p');
   flow.textContent = 'Flow Warning: ' + flag(data.flow_warning);
   section.append(flow);
-  for (const [key, value] of Object.entries(data.flow_attributes || {})) {
-    const detail = document.createElement('p');
-    detail.textContent = key.replaceAll('_', ' ') + ': ' + flag(value);
-    section.append(detail);
-  }
   const installation = document.createElement('p');
   installation.textContent = 'Meter Installation Status: ' + ({normal:'Normal', warning:'Warning', unknown:'Unknown'}[data.meter_installation_status] || 'Unknown');
   section.append(installation);
-  for (const [key, value] of Object.entries(data.installation_attributes || {})) {
-    const detail = document.createElement('p');
-    detail.textContent = key.replaceAll('_', ' ') + ': ' + (typeof value === 'string' ? value : flag(value));
-    section.append(detail);
-  }
   const ext = data.extension || {};
   const extension = document.createElement('p');
   extension.textContent = 'Extension Byte Warning: ' + flag(ext.extension_byte_warning) +
     ' (' + (ext.extension_byte || 'Unknown') + ')';
   section.append(extension);
+  const details=document.createElement('details'); details.className='diagnostic-details';
+  details.open=diagnosticOpen.get(meterId)===true;
+  details.ontoggle=()=>diagnosticOpen.set(meterId,details.open);
+  const summary=document.createElement('summary'); summary.textContent='Diagnostic details'; details.append(summary);
+  const attributes=new Map();
+  for(const [source,values] of [['Flow',data.flow_attributes||{}],['Installation',data.installation_attributes||{}]]) {
+    for(const [key,value] of Object.entries(values)) {
+      if(!attributes.has(key)) attributes.set(key,[]);
+      attributes.get(key).push({source,value});
+    }
+  }
+  for(const [key,entries] of attributes) {
+    const format=value=>typeof value==='string'?value:flag(value);
+    const detail=document.createElement('p');
+    const consistent=entries.every(e=>e.value===entries[0].value);
+    detail.textContent=key.replaceAll('_',' ')+': '+(consistent?format(entries[0].value)+' ('+entries.map(e=>e.source).join(', ')+')':entries.map(e=>e.source+': '+format(e.value)).join('; '));
+    if(entries.some(e=>e.value===true)) {
+      detail.className='diagnostic-warning';
+      const visible=document.createElement('p'); visible.className='diagnostic-warning'; visible.textContent=detail.textContent; section.append(visible);
+    }
+    details.append(detail);
+  }
+  section.append(details);
   const stamp = document.createElement('p');
-  stamp.textContent = 'Last verified diagnostics: ' + (data.read_at_utc || 'Unknown');
+  stamp.className='diagnostic-stamp';
+  stamp.textContent = 'Last verified diagnostics: ' + displayTimestamp(data.read_at_utc || 'Unknown');
   section.append(stamp);
   return section;
 }
@@ -425,8 +449,8 @@ async function refresh() {
       `uavklarte svar: ${state.scan_errors.length}, opprydding venter: ${state.cleanup_pending}. ` +
       `Historikk: ${localText(state.history.status)}` + (state.history.archive_position ? ` — archive ${state.history.archive_position}/24` : '') + (state.history.error ? ` – ${localText(state.history.error)}` : '');
     document.getElementById('clock-status').textContent =
-      `Klokke: ${localText(state.clock.status)}. Systemtid nå: ${state.clock_target}. ` +
-      (state.clock.result ? `Før: ${state.clock.result.before || '—'}, mål: ${state.clock.result.target || 'ingen endring'}, etter: ${state.clock.result.after || '—'}. ` : '') +
+      `Klokke: ${localText(state.clock.status)}. Systemtid nå: ${displayTimestamp(state.clock_target)}. ` +
+      (state.clock.result ? `Før: ${displayTimestamp(state.clock.result.before || '—')}, mål: ${displayTimestamp(state.clock.result.target || 'ingen endring')}, etter: ${displayTimestamp(state.clock.result.after || '—')}. ` : '') +
       (state.clock.result && state.clock.result.dst_test ? `DST 1: ${state.clock.result.dst_test_results?.["1"] === true ? "PASS" : state.clock.result.dst_test_results?.["1"] === false ? "FAIL" : "NOT TESTED"}; DST 0: ${state.clock.result.dst_test_results?.["0"] === true ? "PASS" : state.clock.result.dst_test_results?.["0"] === false ? "FAIL" : "NOT TESTED"}; restored: ${state.clock.result.clock_restored ? "PASS" : "FAIL"}. ` : '') + (localText(state.clock.error) || '');
     if (state.history.archive_revision !== lastArchiveRevision ||
         (state.history.captured_at_utc && state.history.captured_at_utc !== lastHistoryCapture)) {
@@ -457,7 +481,7 @@ async function refresh() {
             line.append(button('Primary address',()=>openAddressPanel(item,addressHost)), addressHost);
             if(addressMeter===item.meter_id && !addressPanel.hidden) addressHost.append(addressPanel);
           }
-          line.append(renderActiveDiagnostics((state.active_diagnostics || {})[item.meter_id] || {}));
+          line.append(renderActiveDiagnostics((state.active_diagnostics || {})[item.meter_id] || {},item.meter_id));
           if (state.diagnostic_capture_enabled) {
             const capture = button('Capture frame 5 (test)', async () => {
               if (!confirm('Read one diagnostic telegram and restore normal polling? This may take several minutes.')) return;
@@ -494,7 +518,9 @@ async function refresh() {
             const ack = button("Acknowledge history failure", () => act("/api/ack_history", item.meter_id));
             line.append(ack);
           }
-          const remove = button('Fjern', () => act('/api/remove', item.meter_id)); remove.disabled = busy; line.append(remove);
+          const actions=document.createElement('div'); actions.className='meter-actions';
+          const actionTitle=document.createElement('div'); actionTitle.className='meter-actions-title'; actionTitle.textContent='Meter operations'; actions.append(actionTitle);
+          const remove = button('Fjern', () => act('/api/remove', item.meter_id)); remove.disabled = busy;
           const hist = button('Hent månedshistorikk', async () => {
             if (!confirm('Read monthly archive? Existing energy history is preserved. Missing extended months are read individually; a full archive can require over 90 minutes. Normal polling may pause. Continue?')) return;
             if (historySubmitting || hist.disabled) return;
@@ -506,15 +532,17 @@ async function refresh() {
           });
           const migration = state.migrations[item.meter_id];
           hist.disabled = busy || !state.history_enabled || state.history.status === 'restore_unverified' || migration === "pending" || migration === "invalid";
-          if (migration === "pending" || migration === "complete") {
-            const migrate = button(migration === "complete" ? "Migration completed (24/24 + 23/23)" : "Migrate historical data", async () => {
+          if(migration==="complete") {
+            const migrated=document.createElement("p"); migrated.className="migration-status"; migrated.textContent="Migration completed (24/24 + 23/23)"; actions.append(migrated);
+          } else if (migration === "pending") {
+            const migrate = button("Migrate historical data", async () => {
               await act("/api/migrate", item.meter_id);
               await refreshHistory();
             });
-            migrate.disabled = busy || migration === "complete";
-            line.append(migrate);
+            migrate.disabled = busy;
+            actions.append(migrate);
           }
-          line.append(hist);
+          actions.append(hist);
           if (state.history.manual_meter === item.meter_id) {
             const stopHistory = button(state.history.stopping ? 'Stopping…' : 'Stop', async () => {
               stopHistory.disabled = true;
@@ -523,7 +551,7 @@ async function refresh() {
               finally { lastLists=''; await refresh(); }
             });
             stopHistory.disabled = state.history.stopping;
-            line.append(stopHistory);
+            actions.append(stopHistory);
           }
           const clock = button('Synkroniser målerklokke', async () => {
             if (!confirm('Sette målerens klokke til systemtid i ' + state.clock_target + '? Dette skriver til måleren. Fortsette?')) return;
@@ -531,7 +559,9 @@ async function refresh() {
             catch (e) { document.getElementById('error').textContent=e.message; }
           });
           clock.disabled = busy || !state.clock_enabled || state.history.status === 'restore_unverified';
-          line.append(clock);
+          actions.append(clock); line.append(actions);
+          const admin=document.createElement("div"); admin.className="meter-admin";
+          const adminTitle=document.createElement("strong"); adminTitle.textContent="Meter administration"; admin.append(adminTitle,document.createElement("br"),remove); line.append(admin);
         }
         else if (item.supported) { const add=button('Legg til', () => act('/api/select', item.meter_id)); add.disabled=busy; line.append(add); }
         else line.append(' (ikke støttet)');

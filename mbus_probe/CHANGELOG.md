@@ -1,3 +1,11 @@
+## v3.0.0-beta.4
+
+- Compact active diagnostics with visible active warning details and expandable source-labelled attributes. Identical values shared by flow and installation views are consolidated; differences remain visible.
+- Display timestamps without fractional seconds while retaining the original UTC or local offset semantics.
+- Collapse clock and history help, and historical fault detail; shorten and wrap history table headings.
+- Group meter operations and administration, and show completed migration as status rather than a disabled button.
+- Presentation-only changes. Physical address writing remains disabled.
+
 ## v3.0.0-beta.3
 
 - Improve mobile address entry with a large three-digit numeric field, explicit range validation, and separate compact search controls.
