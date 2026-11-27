@@ -1,3 +1,9 @@
+## v3.0.0-beta.6
+
+- Optional experimental Fast scan, off by default. Standard search retains the two-second silent-probe interval.
+- At 2400 baud, fast mode starts with a 200 ms first-byte window and 10 ms quiet pause after silent exchanges; complete fast pass followed by a 60-second quiet guard and standard-speed rechecks of affected addresses. Fast results remain provisional evidence, not proof of availability.
+- Sequential 000–250 address grid with live status colors and a legend; unresolved addresses remain blocked. Selected-address checks wait 60 seconds before each of two conservative observations where no response is received. Physical address writing remains disabled.
+
 ## v3.0.0-beta.5
 
 - Remove automatic meter selection from the Web UI; manual selection remains.

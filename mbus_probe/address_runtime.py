@@ -15,7 +15,7 @@ class ReadOnlyAddressTransport:
         self.config, self.gate, self.bus_lock, self.shutdown = config, gate, bus_lock, shutdown
         self.serial_factory = serial_factory
 
-    def _read_primary(self, address, *, discovery=False):
+    def _read_primary(self, address, *, discovery=False, fast_timeout=None, quiet=0.01):
         address = validate_address(address)
         if not self.bus_lock.owned_by_current_thread() or self.shutdown.is_set():
             raise RuntimeError("address probe unavailable")
@@ -24,20 +24,60 @@ class ReadOnlyAddressTransport:
             from serial import Serial
             factory = Serial
         frame = bytes((0x10,0x5B,address,(0x5B+address)&255,0x16))
-        with factory(self.config["serial_port"], baudrate=int(self.config.get("baud",2400)),
-                     bytesize=8, parity="E", stopbits=1, timeout=2, write_timeout=2) as serial:
-            serial.reset_input_buffer()
-            send = self.gate.write_primary_probe if discovery else self.gate.write
-            if send(serial,frame) != len(frame):
-                raise OSError("partial primary probe")
-            raw=receive_window(serial)
-            capture("RX",raw)
-        if discovery:
-            self.gate.complete_primary_probe(address, raw)
+        try:
+            with factory(self.config["serial_port"], baudrate=int(self.config.get("baud",2400)),
+                         bytesize=8, parity="E", stopbits=1, timeout=2, write_timeout=2) as serial:
+                if fast_timeout is not None:
+                    # Never discard already buffered bytes in experimental mode.
+                    if serial.in_waiting:
+                        self.gate.invalidate_primary_probe()
+                        raise ValueError('unexpected buffered input before probe')
+                    written=self.gate.write_primary_probe(serial,frame,interval=fast_timeout,quiet=quiet,defer_completion=True)
+                else:
+                    serial.reset_input_buffer()
+                    send = self.gate.write_primary_probe if discovery else self.gate.write
+                    written=send(serial,frame,defer_completion=True)
+                if written != len(frame):
+                    raise OSError("partial primary probe")
+                if fast_timeout is None:
+                    raw=receive_window(serial)
+                else:
+                    # Short first-byte window only; any byte triggers full conservative receive.
+                    serial.timeout=fast_timeout
+                    first=serial.read(1)
+                    serial.timeout=2
+                    raw=first+receive_window(serial,limit=261) if first else b''
+                    if serial.in_waiting:
+                        raise ValueError('extra buffered input')
+                capture("RX",raw)
+            self.gate.complete_read_exchange()
+            if discovery:
+                self.gate.complete_primary_probe(address, raw)
+                if raw:
+                    self.gate.invalidate_primary_probe()
+        except Exception:
+            # Include failed reads, partial TX, and adapter-close failures.
+            # A failed exchange must never retain the silent-probe shortcut.
+            self.gate.invalidate_primary_probe()
+            raise
         return raw
 
     def check(self, address):
         return assess_destination(address,{},"",self._read_primary(address, discovery=True),checked=True)
+
+    def check_fast(self, address, timeout, quiet=0.01):
+        if int(self.config.get('baud',2400)) != 2400:
+            return self.check(address)
+        return assess_destination(address,{},'',self._read_primary(address,discovery=True,fast_timeout=timeout,quiet=quiet),checked=True)
+
+    def begin_quiet_guard(self):
+        if not self.bus_lock.owned_by_current_thread():
+            raise RuntimeError('shared bus lease required')
+        self.gate.invalidate_primary_probe()
+
+    def check_conservative(self, address):
+        self.begin_quiet_guard()
+        return assess_destination(address,{},'',self._read_primary(address),checked=True)
 
     def observe_identity(self, address):
         return self.observe_identity_and_number(address)[0]

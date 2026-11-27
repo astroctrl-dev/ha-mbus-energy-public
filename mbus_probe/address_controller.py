@@ -52,6 +52,17 @@ class AddressController:
                                 if resolve_conflict is True else self.transport.check(new_address))
             except (OSError, ValueError, RuntimeError):
                 availability = Availability.FAILED
+            # A second independent conservative probe is mandatory before a
+            # silent destination can authorize the normal transaction. The
+            # candidate transport enforces its shared full interval per exchange.
+            if availability is Availability.NO_RESPONSE:
+                try:
+                    second = (self.transport.check_quarantined(self.registry, identity, new_address)
+                              if resolve_conflict is True else self.transport.check(new_address))
+                except (OSError, ValueError, RuntimeError):
+                    second = Availability.FAILED
+                if second is not Availability.NO_RESPONSE:
+                    return "destination_blocked"
             if any(k != meter_id and a == new_address for k, a in self.registry.selected.items()):
                 availability = Availability.OCCUPIED
             if not isinstance(availability, Availability):

@@ -62,6 +62,7 @@ class BusTiming:
         self.monotonic, self.wall, self.sleep = monotonic, wall, sleep
         self.lock = threading.Lock()
         self.address_blocked = address_blocked
+        self.persistence_failed = False
         # Fast path is deliberately volatile: restart and ordinary traffic
         # retain the full global guard. Only completed silent primary probes
         # can authorize a shorter interval for a different primary address.
@@ -95,6 +96,16 @@ class BusTiming:
                 pass
 
     def _persist_resume(self, completed):
+        try:
+            self._write_resume_record(completed)
+        except OSError:
+            self.persistence_failed = True
+            self._silent_probe = None
+            self._pending_probe = None
+            self.eligible = max(self.eligible, self.monotonic()+MIN_INTERVAL)
+            raise
+
+    def _write_resume_record(self, completed):
         if not self.boot_id:
             return
         self.resume_path.parent.mkdir(parents=True, exist_ok=True)
@@ -115,9 +126,11 @@ class BusTiming:
             temp.unlink(missing_ok=True)
 
     def ready(self):
-        return self.monotonic() >= self.eligible
+        return not self.persistence_failed and self.monotonic() >= self.eligible
 
     def check_address_safety(self, permit=None, frame=None):
+        if self.persistence_failed:
+            raise AddressSafetyBlocked('timing state persistence failed; restart after storage recovery')
         if self.diagnostic_guard is not None:
             from address_diagnostic import DiagnosticPermit
             if type(permit) is DiagnosticPermit:
@@ -136,11 +149,29 @@ class BusTiming:
         if self.address_blocked is not None and self.address_blocked():
             raise AddressSafetyBlocked('address safety state requires reconciliation')
 
-    def write_primary_probe(self, serial, frame):
+    def write_primary_probe(self, serial, frame, *, interval=PRIMARY_PROBE_INTERVAL, quiet=0.0, defer_completion=False):
+        if type(quiet) not in (int,float) or not math.isfinite(quiet) or not 0 <= quiet <= 2:
+            raise ValueError('invalid post-exchange quiet interval')
+        if type(interval) not in (int,float) or not math.isfinite(interval) or not 0.2 <= interval <= PRIMARY_PROBE_INTERVAL:
+            raise ValueError('invalid experimental probe interval')
         if (type(frame) is not bytes or len(frame) != 5 or frame[:2] != b'\x10\x5b'
                 or frame[2] > 250 or frame[3] != (0x5b + frame[2]) & 255 or frame[4] != 0x16):
             raise ValueError('only exact individually addressed read-only probe permitted')
-        return self.write(serial, frame, _primary_probe=frame[2])
+        return self.write(serial, frame, _primary_probe=frame[2], _probe_interval=interval, _probe_quiet=quiet, defer_completion=defer_completion)
+
+    def invalidate_primary_probe(self):
+        with self.lock:
+            self._silent_probe=None
+            self._pending_probe=None
+            self.eligible=max(self.eligible,self.monotonic()+MIN_INTERVAL)
+            self._persist_resume(self.eligible-MIN_INTERVAL)
+
+    def complete_read_exchange(self):
+        # Called only after serial RX and close completed under the shared lease.
+        # Persist the conservative completion instant without altering the
+        # ordinary distinct-address silent-probe pacing in this process.
+        with self.lock:
+            self._persist_resume(self.monotonic())
 
     def complete_primary_probe(self, address, raw):
         # Called by the exclusive read-only transport only after its full
@@ -151,7 +182,7 @@ class BusTiming:
                 self._silent_probe = (address, self.monotonic())
             self._pending_probe = None
 
-    def write(self, serial, frame, *, permit=None, _primary_probe=None):
+    def write(self, serial, frame, *, permit=None, _primary_probe=None, _probe_interval=PRIMARY_PROBE_INTERVAL, _probe_quiet=0.0, defer_completion=False):
         attempted = False
         written = None
         try:
@@ -164,13 +195,16 @@ class BusTiming:
                 if _primary_probe is not None and permit is None and target is None and self._silent_probe is not None:
                     previous, response_completed = self._silent_probe
                     if previous != _primary_probe:
-                        eligible = min(eligible, max(response_completed + 0.0,
-                            self.eligible - MIN_INTERVAL + PRIMARY_PROBE_INTERVAL,
+                        eligible = min(eligible, max(response_completed + _probe_quiet,
+                            self.eligible - MIN_INTERVAL + _probe_interval,
                             self._probe_times.get(_primary_probe, float('-inf')) + MIN_INTERVAL))
                 self._silent_probe = None
                 self._pending_probe = None
                 while self.monotonic() < eligible:
                     self.sleep(eligible - self.monotonic())
+                if _primary_probe is not None and _probe_quiet and serial.in_waiting:
+                    self.eligible=max(self.eligible,self.monotonic()+MIN_INTERVAL)
+                    raise ValueError('unexpected buffered input after guard wait')
                 self.path.parent.mkdir(parents=True, exist_ok=True)
                 temp = self.path.with_suffix(".tmp")
                 try:
@@ -192,6 +226,9 @@ class BusTiming:
                 if target is not None and not slot_open(target, self.wall(), getattr(_slot, 'tolerance', 1.0)):
                     raise MissedSlot('durable preparation exceeded planned slot')
                 self.check_address_safety(permit, frame)
+                if _primary_probe is not None and _probe_quiet and serial.in_waiting:
+                    self.eligible=max(self.eligible,self.monotonic()+MIN_INTERVAL)
+                    raise ValueError('unexpected buffered input before transmission')
                 LOG.info("M-Bus TX ready: %d bytes", len(frame))
                 if permit is not None:
                     permit.consume(frame)
@@ -208,7 +245,7 @@ class BusTiming:
                 finally:
                     completed = self.monotonic()
                     self.eligible = completed + MIN_INTERVAL
-                    self._persist_resume(completed)
+                    self._persist_resume(None if defer_completion else completed)
                     if _primary_probe is None:
                         # A global operation (possibly broadcast/selected) resets
                         # fast discovery and imposes a full bus-wide guard.
