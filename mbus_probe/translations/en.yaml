@@ -1,4 +1,7 @@
 configuration:
+  allow_address_diagnostic:
+    name: "Allow address protocol diagnostic"
+    description: "Enable the isolated read-only protocol test only after approval."
   allow_diagnostic_capture:
     name: "Allow diagnostic test capture"
     description: "Permit one manually confirmed frame-5 evidence capture. No automatic reading or active status decoding."

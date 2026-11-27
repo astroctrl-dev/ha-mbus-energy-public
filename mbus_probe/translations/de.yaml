@@ -1,4 +1,7 @@
 configuration:
+  allow_address_diagnostic:
+    name: "Adressprotokolldiagnose erlauben"
+    description: "Isolierten Protokolltest ohne dauerhafte Schreibbefehle nur nach Freigabe aktivieren."
   allow_diagnostic_capture:
     name: "Diagnose-Testabfrage erlauben"
     description: "Manuell bestätigte Abfrage von Rahmen 5 erlauben. Keine automatische Abfrage."

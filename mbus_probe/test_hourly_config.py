@@ -37,3 +37,8 @@ class HourlyConfigTests(unittest.TestCase):
         for value in (1, "true", None):
             with self.assertRaisesRegex(ValueError, "read_before_full_hour"):
                 self.load(read_before_full_hour=value)
+
+    def test_obsolete_meter_options_cannot_select_instrument(self):
+        config = self.load(address=251, meter_id="01234567", use_daylight_saving_time=True)
+        for key in ("address", "meter_id", "use_daylight_saving_time"):
+            self.assertNotIn(key, config)

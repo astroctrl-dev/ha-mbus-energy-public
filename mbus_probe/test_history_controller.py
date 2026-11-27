@@ -124,7 +124,7 @@ class HistoryControllerTests(unittest.TestCase):
         self.config["allow_monthly_history"] = False
         with patch.object(self.stop, "wait", return_value=False), \
                 patch("history_controller.validate", return_value={"address": 0}), \
-                patch("history_controller.select_measurements", return_value={"energy": 1}):
+                patch("ha_measurements.select_measurements", return_value={"energy": 1}):
             self.assertFalse(controller.recover_normal(lambda *a, **k: (b"", b"")))
         self.assertTrue(controller.marker.exists())
         self.assertTrue(controller.blocked.is_set())
@@ -132,7 +132,7 @@ class HistoryControllerTests(unittest.TestCase):
         with patch.object(self.stop, "wait", return_value=False), \
                 patch("history_controller.validate", return_value={"address": 0, "records": [
                     {"kind": k, "current_record": True} for k in REQUIRED_SENSORS]}), \
-                patch("history_controller.select_measurements",
+                patch("ha_measurements.select_measurements",
                       return_value={k: 1 for k in REQUIRED_SENSORS if k != "temperature_difference"}):
             self.assertTrue(controller.recover_normal(lambda *a, **k: (b"", b"")))
         self.assertFalse(controller.marker.exists())
@@ -151,7 +151,7 @@ class HistoryControllerTests(unittest.TestCase):
         with patch.object(self.stop, "wait", return_value=False), \
                 patch("history_controller.validate", return_value=historical), \
                 patch("history_controller.extract_months", return_value=months()), \
-                patch("history_controller.select_measurements", side_effect=ValueError("not normal")), \
+                patch("ha_measurements.select_measurements", side_effect=ValueError("not normal")), \
                 patch.object(controller, "_restore_interface") as restore:
             self.assertFalse(controller.recover_normal(reader))
             restore.assert_not_called()
@@ -161,7 +161,7 @@ class HistoryControllerTests(unittest.TestCase):
                 patch("history_controller.validate", side_effect=[historical, {"address": 0, "records": [
                     {"kind": k, "current_record": True} for k in REQUIRED_SENSORS]}]), \
                 patch("history_controller.extract_months", return_value=months()), \
-                patch("history_controller.select_measurements",
+                patch("ha_measurements.select_measurements",
                       side_effect=[ValueError("not normal"), {k: 1 for k in REQUIRED_SENSORS}]), \
                 patch.object(controller, "_restore_interface") as restore:
             self.assertTrue(controller.recover_normal(reader))
@@ -350,7 +350,7 @@ class ArchiveControllerTests(unittest.TestCase):
              patch("history_controller.validate",side_effect=[historical,normal]), \
              patch("history_controller.extract_months",side_effect=ValueError), \
              patch("history_controller.extract_monthly_set_day",side_effect=ValueError), \
-             patch("history_controller.select_measurements",side_effect=[ValueError,{k:1 for k in REQUIRED_SENSORS}]), \
+             patch("ha_measurements.select_measurements",side_effect=[ValueError,{k:1 for k in REQUIRED_SENSORS}]), \
              patch.object(c,"_confirmed_archive",return_value=True), \
              patch.object(c,"_restore_interface") as restore:
             self.assertTrue(c.recover_normal(Mock(return_value=(b"tx",b"rx"))))
@@ -369,7 +369,7 @@ class ArchiveControllerTests(unittest.TestCase):
         normal={"address":0,"records":[{"kind":k,"current_record":True} for k in REQUIRED_SENSORS]}
         with patch("history_controller.shared_timing_active",return_value=True), \
              patch("history_controller.validate",return_value=normal), \
-             patch("history_controller.select_measurements",return_value={k:1 for k in REQUIRED_SENSORS}), \
+             patch("ha_measurements.select_measurements",return_value={k:1 for k in REQUIRED_SENSORS}), \
              patch.object(c,"_restore_interface") as restore:
             reader=Mock(return_value=(b"tx",b"rx"))
             self.assertTrue(c.recover_normal(reader))
@@ -402,7 +402,7 @@ class ArchiveControllerTests(unittest.TestCase):
         normal={"address":0,"records":[{"kind":k,"current_record":True} for k in REQUIRED_SENSORS]}
         with patch("history_controller.shared_timing_active",return_value=True), \
              patch("history_controller.validate",side_effect=[historical,normal]), \
-             patch("history_controller.select_measurements",side_effect=[ValueError("historical"),{k:1 for k in REQUIRED_SENSORS}]), \
+             patch("ha_measurements.select_measurements",side_effect=[ValueError("historical"),{k:1 for k in REQUIRED_SENSORS}]), \
              patch("history_controller.extract_months",side_effect=ValueError), \
              patch("history_controller.extract_monthly_set_day",side_effect=ValueError), \
              patch.object(c,"_confirmed_archive",return_value=True), \

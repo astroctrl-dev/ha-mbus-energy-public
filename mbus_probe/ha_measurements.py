@@ -71,3 +71,15 @@ def select_measurements(decoded, expected_id):
     if not selected:
         raise ValueError("no valid current measurements")
     return selected
+
+
+def verify_normal_layout(decoded, expected_id, address):
+    """Require the ordinary T230 measurement record layout, not all values valid."""
+    if decoded.get("address") != address:
+        raise ValueError("normal frame address mismatch")
+    values=select_measurements(decoded,expected_id)
+    present={r.get("kind") for r in decoded.get("records",()) if r.get("current_record")}
+    missing=REQUIRED_SENSORS-present
+    if missing:
+        raise ValueError("normal frame missing record types: "+", ".join(sorted(missing)))
+    return values

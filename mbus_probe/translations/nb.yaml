@@ -1,4 +1,7 @@
 configuration:
+  allow_address_diagnostic:
+    name: "Tillat adresseprotokolldiagnostikk"
+    description: "Aktiver isolert, skrivebeskyttet protokolltest kun etter godkjenning."
   allow_diagnostic_capture:
     name: "Tillat diagnostisk testavlesning"
     description: "Tillat manuelt bekreftet testavlesning av ramme 5. Ingen automatisk avlesning."

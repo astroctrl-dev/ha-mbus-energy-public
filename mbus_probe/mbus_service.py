@@ -22,6 +22,8 @@ from mbus_probe import read_one, validate
 from mqtt_bridge import (BRIDGE_AVAILABILITY, cleanup_discovery,
                          mark_unavailable, publish_reading, publish_dst_diagnostics)
 from meter_registry import MeterRegistry
+from address_journal import AddressJournal
+from owned_bus_lock import OwnedBusLock
 from meter_ui import serve
 from history_controller import load_history
 from mqtt_bridge import publish_history, publish_monthly_retry
@@ -73,8 +75,9 @@ def load_config(path="/data/options.json"):
         raise ValueError("select a serial device in the app options")
     if not config.get("mqtt_host") or not isinstance(config["mqtt_host"], str):
         raise ValueError("mqtt_host is required")
-    if not 0 <= int(config.get("address", 0)) <= 250:
-        raise ValueError("address outside 0..250")
+    # Obsolete options cannot select a meter in v3.0.0.
+    config.pop("address", None)
+    config.pop("meter_id", None)
     if int(config.get("interval_seconds", 120)) not in (60, 90, 120, 300, 600):
         raise ValueError("interval_seconds must be one of 60, 90, 120, 300, 600")
     if not isinstance(config.get("allow_clock_sync", False), bool) or not isinstance(config.get("auto_clock_sync", False), bool):
@@ -90,6 +93,8 @@ def load_config(path="/data/options.json"):
         ZoneInfo(config.get("clock_timezone", "Europe/Oslo"))
     except (ZoneInfoNotFoundError, TypeError, ValueError):
         raise ValueError("invalid clock_timezone")
+    if not isinstance(config.get("allow_address_diagnostic", False), bool):
+        raise ValueError("allow_address_diagnostic must be boolean")
     if not isinstance(config.get("allow_diagnostic_capture", False), bool):
         raise ValueError("allow_diagnostic_capture must be boolean")
     if not isinstance(config.get("allow_monthly_history", False), bool):
@@ -206,6 +211,11 @@ def run(config, client, registry=None, bus_lock=None, history_controller=None,
     target = None
     last_served = None
     while not STOP.is_set():
+        if timing and ((getattr(timing, 'address_blocked', None) and timing.address_blocked())
+                       or (getattr(timing, 'diagnostic_guard', None) and timing.diagnostic_guard.blocked())):
+            client.publish(BRIDGE_AVAILABILITY, 'offline', qos=1, retain=True)
+            STOP.wait(5)
+            continue
         if history_controller and history_controller.blocked.is_set():
             client.publish(BRIDGE_AVAILABILITY, "offline", qos=1, retain=True)
             if history_controller.recover_normal():
@@ -327,12 +337,19 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     config = load_config()
     fresh = (not Path('/data/analysis').exists() and not Path('/data/meters.json').exists()
-             and not config.get('meter_id'))
-    timing = BusTiming(resume=True, fresh=fresh)
-    install_bus_timing(timing)
+             and not Path('/data/address-change.json').exists()
+             and not Path('/data/address-diagnostic.json').exists())
     registry = MeterRegistry()
-    registry.migrate_legacy(config.get("meter_id"), int(config.get("address", 0)))
-    bus_lock = threading.Lock()
+    journal = AddressJournal('/data/address-change.json')
+    def address_blocked():
+        # Conservative bus-wide quarantine until targeted recovery is verified.
+        with registry.lock:
+            return journal.blocked() or registry.persistence_failed or bool(registry.quarantined)
+    from address_diagnostic import DiagnosticGuard
+    diagnostic_guard = DiagnosticGuard('/data/address-diagnostic.json')
+    timing = BusTiming(resume=True, fresh=fresh, address_blocked=address_blocked, diagnostic_guard=diagnostic_guard)
+    install_bus_timing(timing)
+    bus_lock = OwnedBusLock()
     import paho.mqtt.client as mqtt
     client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
                          client_id="mbus_t230_bridge")
@@ -373,8 +390,21 @@ def main():
     config["_frame5_layout_approved"] = True
     config["_diagnostic_runtime"] = DiagnosticRuntime(
         root="/data/analysis" if config.get("_frame5_layout_approved") is True else None)
+    from address_runtime import build_read_only_jobs
+    address_search_job, address_change_job = build_read_only_jobs(config,registry,timing,bus_lock,STOP)
+    def diagnostic_factory(admission,history_blocked):
+        from address_diagnostic_job import AddressDiagnosticJob
+        from address_runtime import run_isolated_diagnostic
+        def runner(**kwargs):
+            return run_isolated_diagnostic(config,registry,timing,bus_lock,STOP,admission,**kwargs)
+        return AddressDiagnosticJob(runner,diagnostic_guard,STOP,history_blocked,
+                                    enabled=config.get("allow_address_diagnostic") is True,
+                                    recovery_history_blocked=lambda: history_controller.marker.exists() or
+                                    (history_controller.blocked.is_set() and not history_controller.startup_pending))
     server = serve(registry, config, client, bus_lock, STOP, raw_log=raw_log,
-                   history_controller=history_controller)
+                   address_diagnostic_factory=diagnostic_factory,
+                   address_search_job=address_search_job, address_change_job=address_change_job,
+                   history_controller=history_controller, address_safety_blocked=lambda: address_blocked() or diagnostic_guard.blocked())
     maintenance = MaintenanceSchedule(config, server.clock_controller, server.history_controller, STOP)
     config["_clock_observer"] = maintenance.observe_clock
     def valid_round(meter_ids):

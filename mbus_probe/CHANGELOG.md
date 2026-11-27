@@ -1,3 +1,12 @@
+## v3.0.0-beta.1 — diagnostic preview
+
+- Optional address protocol diagnostics in the Web UI, disabled by default.
+- Read-only primary-address search and controlled diagnostic sequence with durable recovery guard and private local evidence export.
+- Physical primary-address changes remain disabled.
+- Simulator coverage includes multiple meters, interrupted telegrams, restart and persistence failures. Physical multi-meter behavior, actual HA acceptance and independent review remain outstanding.
+- Use only an approved isolated test environment; back up application data before updating. Do not downgrade while a diagnostic recovery guard is pending.
+- Previous executable candidate passed offline tests, image build and runtime imports; this versioned candidate requires its own CI confirmation.
+
 ## v2.9.2
 
 - Daily frame-5 diagnostics at 03:15 local time

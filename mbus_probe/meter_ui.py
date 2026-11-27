@@ -7,6 +7,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from meter_discovery import scan_bus
+from operation_admission import OperationAdmission
 from analysis_export import load_samples, make_xlsx
 from history_controller import HistoryController, load_history, stored_archive_progress
 from clock_maintenance import ClockController
@@ -24,7 +25,7 @@ PAGE = r"""<!doctype html><html lang="no"><meta charset="utf-8"><meta name="view
 <p>Initial readings are normally available within about 60 seconds. If the meter is in a confirmed historical telegram mode, automatic restoration of normal telegram mode may take about three minutes in total. Communication errors may extend this time. The minimum interval between commands is 60 seconds.</p><button id="scan">Søk etter målere</button><button id="auto">Velg eneste ledige automatisk</button>
 <h2>Tilgjengelige målere</h2><div id="available"></div>
 <h2>Etablerte målere</h2><div id="selected"></div><pre id="diagnostic-evidence" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre>
-<h2>Klokke</h2><p>Synkronisering bruker systemtid og valgt tidssone i Configuration. Manuell synkronisering krever bekreftelse; automatisk kontroll starter etter første gyldige måling ved oppstart eller nytt målervalg.</p><p id="clock-status"></p><h2>Analyse</h2><p>Last ned validerte normalavlesninger og lagret månedshistorikk som Excel-fil. Nedlasting leser lagrede data og sender ingen kommando til måleren. Historikk hentes separat med knappen ved den valgte måleren.</p><p>Measurement data logging is controlled separately in Configuration. Disabling capture keeps existing files and history.</p><button id="export">Last ned analyse (.xlsx)</button>
+<section id="protocol-diagnostic-panel" hidden><h2>Address protocol diagnostic (test)</h2><p>Isolated single-meter test only. Normal polling pauses for several minutes. No permanent meter parameter writes are authorized.</p><fieldset id="protocol-diagnostic-fields"><legend>Expected instrument identity</legend><p><label>Meter ID <input id="pd-id" inputmode="numeric" maxlength="8" pattern="[0-9]{8}"></label></p><p><label>Manufacturer <input id="pd-manufacturer" maxlength="3" pattern="[A-Z]{3}"></label></p><p><label>Version <input id="pd-version" type="number" min="0" max="254" step="1"></label> <label>Medium <input id="pd-medium" type="number" min="0" max="254" step="1"></label></p><p><label>Fabrication number <input id="pd-number" inputmode="numeric" maxlength="8" pattern="[0-9]{8}"></label></p><p><label>Current primary address <input id="pd-address" type="number" min="0" max="250" step="1"></label></p></fieldset><p><label><input id="pd-single" type="checkbox"> I confirm only one physical meter and one master are connected.</label></p><button id="pd-start" disabled>Run protocol test</button><button id="pd-recover" hidden disabled>Recover diagnostic session</button><p id="pd-status" role="status"></p><p id="pd-pending"></p><p><label>Evidence filename <input id="pd-file" maxlength="42" placeholder="UUID.jsonl"></label><button id="pd-download" disabled>Download private evidence</button></p></section><section id="quarantine-panel" hidden><h2>Address conflict recovery</h2><p>Normal bus operations are blocked until all affected instruments are verified. No response does not prove an address is free.</p><div id="quarantine-list"></div><p id="quarantine-status" role="status"></p></section><section id="address-recovery" hidden><h2>Address recovery</h2><p id="address-recovery-info" role="status"></p><p>Verify the physical address without repeating the address change.</p><button id="address-recover">Verify actual address</button></section><section id="address-panel" hidden><h2>Primary address</h2><p id="address-meter"></p><label for="address-target">New primary address (0–250)</label> <input id="address-target" type="number" min="0" max="250" step="1"><p><button id="address-check">Check address</button><button id="address-search">Search all addresses</button><button id="address-stop">Stop search</button></p><p id="address-progress" role="status"></p><div id="address-results"></div><p>No response does not guarantee availability. Counts refer to registered meters. A full search can take over four hours at the configured 60-second bus interval.</p><div id="address-write-panel" hidden><label><input type="checkbox" id="address-override" disabled> Accept displayed destination risk</label><p id="address-risk" role="status"></p><button id="address-change">Change address</button><p id="address-change-status" role="status"></p></div><p id="address-write-disabled">Address writing is not enabled in this build.</p></section><h2>Klokke</h2><p>Synkronisering bruker systemtid og valgt tidssone i Configuration. Manuell synkronisering krever bekreftelse; automatisk kontroll starter etter første gyldige måling ved oppstart eller nytt målervalg.</p><p id="clock-status"></p><h2>Analyse</h2><p>Last ned validerte normalavlesninger og lagret månedshistorikk som Excel-fil. Nedlasting leser lagrede data og sender ingen kommando til måleren. Historikk hentes separat med knappen ved den valgte måleren.</p><p>Measurement data logging is controlled separately in Configuration. Disabling capture keeps existing files and history.</p><button id="export">Last ned analyse (.xlsx)</button>
 <h2>Lagret månedshistorikk</h2><p>First installation: leave all optional switches off and verify ordinary live measurements before enabling additional functions. Initial retrieval reads frames 2 and 3. Subsequent manual retrieval reads missing extended months (frame 4); allow about four minutes per month. The table shows progress for the current job. Regular polling pauses; live values may be stale or temporarily unavailable. Clock synchronization and scanning also respect the interval. Downloads use saved data and do not query the meter.</p><p>Positions indicate the order in the meter archive. A dash means no retrieval has been started in this session. Saved energy values remain visible while extended data is being read.</p><div id="history"></div><h2>Raw telegram diagnostics</h2><p>Local capture may contain meter identifiers and consumption. Enable raw capture in Configuration; restart the app to apply. No extra bus requests.</p><p id="raw-status"></p><button id="raw-download">Download raw text (.txt)</button><p id="status"></p><p id="error" role="alert"></p>
 </main><script>
 const root = location.pathname.replace(/\/$/, '');
@@ -34,6 +35,206 @@ let captureEvidenceVisible = false;
 let lastHistoryCapture = null;
 let lastArchiveRevision = -1;
 let historySubmitting = false;
+let addressMeter = null;
+let addressOld = null;
+let addressChangeEnabled = false;
+let addressChangeBusy = false;
+let addressRefreshing = false;
+let addressAppliedResult = null;
+let quarantineRows = [];
+let quarantineView = '';
+let quarantineEnabled = false;
+let quarantineSubmitting = false;
+let quarantineDrafts = new Map();
+let quarantineRecoveryPending = false;
+function renderQuarantine(rows,enabled) {
+  quarantineRows=rows || [];
+  quarantineEnabled=enabled===true;
+  const blocked=addressChangeBusy||quarantineSubmitting||quarantineRecoveryPending||['running','stopping'].includes(addressJob?.status);
+  const panel=document.getElementById('quarantine-panel');
+  panel.hidden=!enabled || !quarantineRows.length;
+  const key=JSON.stringify([enabled,quarantineRows,blocked]);
+  const keys=new Set(quarantineRows.map(r=>r.meter_id+':'+r.address));
+  for(const draft of quarantineDrafts.keys()) if(!keys.has(draft)) quarantineDrafts.delete(draft);
+  if(key===quarantineView) return;
+  quarantineView=key;
+  const list=document.getElementById('quarantine-list'); list.replaceChildren();
+  if(!enabled) return;
+  for(const row of quarantineRows) {
+    const line=document.createElement('div');
+    line.textContent='ID '+row.meter_id+' — '+addressFormat(row.address)+(row.registered_conflict?' — Registered address conflict':'');
+    const input=document.createElement('input'); input.type='number'; input.min='0';input.max='250';input.step='1';input.setAttribute('aria-label','New primary address for '+row.meter_id);
+    const draftKey=row.meter_id+':'+row.address;
+    input.value=quarantineDrafts.get(draftKey)||'';
+    input.oninput=()=>quarantineDrafts.set(draftKey,input.value);
+    input.disabled=blocked;
+    const action=async(kind)=>{
+      if(blocked||quarantineSubmitting||addressChangeBusy||quarantineRecoveryPending) return;
+      const target=kind==='relocate'?Number(input.value):null;
+      if(kind==='relocate' && (!input.value || !input.checkValidity() || target===row.address)) return;
+      if(!confirm(kind+' instrument '+row.meter_id+' at '+addressFormat(row.address)+(target===null?'':' to '+addressFormat(target))+'?')) return;
+      quarantineSubmitting=true;
+      renderQuarantine(quarantineRows,quarantineEnabled);
+      try {
+        const job=await call('/api/address_quarantine',{meter_id:row.meter_id,address:row.address,action:kind,confirm:true,new_address:target});
+        if(job?.status) renderAddressChange({address_change_enabled:addressChangeEnabled,address_change:job,address_search:addressJob});
+        await refreshAddressStatus();
+      }
+      catch(e){document.getElementById('error').textContent=e.message;}
+      finally {quarantineSubmitting=false;renderQuarantine(quarantineRows,quarantineEnabled);}
+    };
+    if(!row.identity_enrolled && !row.registered_conflict) line.append(button('Identify instrument',()=>action('enroll'),blocked));
+    if(row.identity_enrolled) {
+      line.append(input,button('Resolve address conflict',()=>action('relocate'),blocked));
+      if(!row.registered_conflict) line.append(button('Verify and resume',()=>action('verify'),blocked));
+    } else if(row.registered_conflict) line.append(document.createTextNode(' — Resolve another identified instrument first; physical isolation may be required.'));
+    list.append(line);
+  }
+}
+let displayedRisk = null;
+let invalidatedSearch = null;
+function syncRisk() {
+  const row = recoveryJob?.status==='override_required' ? recoveryJob.destination_evidence : null;
+  const target = Number(document.getElementById('address-target').value);
+  const next = row && row.meter_id===addressMeter && row.old_address===addressOld && row.new_address===target ? row : null;
+  if(JSON.stringify(next)!==JSON.stringify(displayedRisk)) document.getElementById('address-override').checked=false;
+  displayedRisk=next;
+  document.getElementById('address-override').disabled=!next;
+  document.getElementById('address-risk').textContent=next?'Destination '+addressFormat(next.new_address)+' — '+(addressLabels[next.status]||next.status)+'; registered peers: '+next.registered_peers.length:'';
+}
+function updateAddressHeader() {
+  document.getElementById('address-meter').textContent='ID '+addressMeter+' — Current address '+addressFormat(addressOld);
+}
+let recoveryJob = null;
+let addressView = '';
+let addressJob = null;
+const addressLabels = {current_address:'Current address',current_address_conflict:'Current address – conflict',occupied:'Occupied',occupied_multiple:'Occupied – multiple meters',ambiguous:'Ambiguous response – possible collision',no_response:'No response',failed:'Check failed'};
+function groupAddressRows(rows) {
+  const groups = [];
+  for (const row of [...rows].sort((a,b)=>a.address-b.address)) {
+    const last = groups[groups.length-1];
+    if (last && row.address === last.end+1 && row.status === last.status && row.known_meter_count === last.count) last.end=row.address;
+    else groups.push({start:row.address,end:row.address,status:row.status,count:row.known_meter_count});
+  }
+  return groups;
+}
+const addressFormat = n=>String(n).padStart(3,'0');
+function renderAddressJob(job) {
+  addressJob = job;
+  if (!addressMeter) return;
+  const matching = job.meter_id === addressMeter;
+  const running = ['running','stopping'].includes(job.status);
+  document.getElementById('address-check').disabled = running;
+  document.getElementById('address-search').disabled = running;
+  document.getElementById('address-stop').disabled = !matching || job.status !== 'running';
+  document.getElementById('address-progress').textContent = matching ? job.status+' – '+job.results.length+'/'+job.total : '';
+  const area = document.getElementById('address-results');
+  const stale=job.search_id!=null && job.search_id===invalidatedSearch;
+  const rows = matching && !stale ? job.results : [];
+  if(stale) document.getElementById('address-progress').textContent='Search results invalidated; check destination again.';
+  const key = JSON.stringify([addressMeter,rows]);
+  if (key === addressView) return;
+  addressView = key;
+  const opened = new Set(Array.from(area.querySelectorAll('details[open]'),d=>d.dataset.start));
+  area.replaceChildren();
+  const choose = n => {document.getElementById('address-target').value=String(n); document.getElementById('address-override').checked=false; syncRisk();};
+  for (const g of groupAddressRows(rows)) {
+    const label = (addressLabels[g.status] || g.status) + (g.count>1 ? ' ('+g.count+')' : '');
+    if (g.start === g.end) {
+      area.append(button(addressFormat(g.start)+' — '+label,()=>choose(g.start)));
+    } else {
+      const details=document.createElement('details'); details.dataset.start=String(g.start);
+      details.open=opened.has(details.dataset.start);
+      const summary=document.createElement('summary');
+      summary.textContent=addressFormat(g.start)+'–'+addressFormat(g.end)+' — '+label;
+      details.append(summary);
+      for(let n=g.start;n<=g.end;n++) details.append(button(addressFormat(n),()=>choose(n)));
+      area.append(details);
+    }
+  }
+}
+function openAddressPanel(item) {
+  addressMeter=item.meter_id;
+  addressOld=item.address;
+  document.getElementById('address-override').checked=false;
+  document.getElementById('address-panel').hidden=false;
+  addressAppliedResult=null;
+  updateAddressHeader();
+  document.getElementById('address-target').value=String(item.address);
+  addressView='';
+  if(addressJob) renderAddressJob(addressJob);
+  syncRisk();
+}
+function renderAddressChange(state) {
+  addressChangeEnabled=state.address_change_enabled === true;
+  const job=state.address_change;
+  recoveryJob=job;
+  if(job?.meter_id===addressMeter && ['verified_new','verified_old'].includes(job.status)) {
+    const key=JSON.stringify([job.operation_id,job.meter_id,job.old_address,job.new_address,job.status]);
+    if(addressAppliedResult!==key) {
+      addressAppliedResult=key;
+      addressOld=job.status==='verified_new'?job.new_address:job.old_address;
+      updateAddressHeader();
+      document.getElementById('address-target').value=String(addressOld);
+      document.getElementById('address-override').checked=false;
+      invalidatedSearch=addressJob?.search_id ?? null;
+      addressView='';
+      document.getElementById('address-results').replaceChildren();
+      document.getElementById('address-progress').textContent='Search results invalidated; check destination again.';
+    }
+  }
+  syncRisk();
+  const recovery=job?.status==='recovery_required';
+  document.getElementById('address-recovery').hidden=!recovery;
+  document.getElementById('address-recovery-info').textContent=recovery?(job.recoverable?'ID '+job.meter_id+' — '+addressFormat(job.old_address)+' / '+addressFormat(job.new_address):'Recovery unavailable; inspect persistent transaction state.') : '';
+  document.getElementById('address-recover').disabled=!job?.recoverable;
+  addressChangeBusy=job?.status === 'running';
+  quarantineRecoveryPending=recovery;
+  renderQuarantine(quarantineRows,quarantineEnabled);
+  if(job?.action) document.getElementById('quarantine-status').textContent=job.meter_id+' — '+job.status;
+  document.getElementById('address-write-panel').hidden=!addressChangeEnabled;
+  document.getElementById('address-write-disabled').hidden=addressChangeEnabled;
+  const searchBusy=['running','stopping'].includes(state.address_search?.status);
+  const quarantined=quarantineRows.length>0;
+  document.getElementById('address-change').disabled=addressChangeBusy||searchBusy||recovery||quarantined;
+  if(addressChangeBusy||recovery||quarantined) {
+    document.getElementById('address-check').disabled=true;
+    document.getElementById('address-search').disabled=true;
+  }
+  const labels={running:'Changing and verifying address…',verified_new:'New address verified',verified_old:'Old address verified; change not confirmed',unchanged:'Address unchanged',override_required:'Destination risk requires explicit confirmation',identity_blocked:'Instrument identity not verified',recovery_required:'Recovery required; do not retry'};
+  document.getElementById('address-change-status').textContent=job?.meter_id===addressMeter?(labels[job.status]||job.status):'';
+}
+document.getElementById('address-recover').onclick=async()=>{
+  const pending=recoveryJob;
+  if(!pending?.recoverable || !confirm('Verify the actual address without repeating the address change?')) return;
+  document.getElementById('address-recover').disabled=true;
+  try {await call('/api/address_recover',{meter_id:pending.meter_id,transaction_id:pending.transaction_id,confirm:true}); await refresh();}
+  catch(e){document.getElementById('error').textContent=e.message;}
+};
+document.getElementById('address-target').oninput=()=>{document.getElementById('address-override').checked=false; syncRisk();};
+document.getElementById('address-change').onclick=async()=>{
+  const input=document.getElementById('address-target');
+  if(!addressChangeEnabled||addressChangeBusy||quarantineRows.length||quarantineRecoveryPending||!addressMeter||!input.value||!input.checkValidity()) return;
+  const target=Number(input.value), override=document.getElementById('address-override').checked;
+  if(target===addressOld || (override && !displayedRisk)) return;
+  if(!confirm('Change meter '+addressMeter+' from '+addressFormat(addressOld)+' to '+addressFormat(target)+'? The destination will be checked again. '+(override?'You explicitly accept destination conflict or uncertainty.':'Conflicting or uncertain destinations will stop the operation.'))) return;
+  document.getElementById('address-change').disabled=true;
+  document.getElementById('address-override').checked=false;
+  try {await call('/api/address_change',{meter_id:addressMeter,old_address:addressOld,new_address:target,confirm:true,override,accepted_risk:override?displayedRisk:null}); await refresh();}
+  catch(e){document.getElementById('error').textContent=e.message;}
+};
+async function addressAction(route, all=false) {
+  if(!addressMeter || (route!=='address_stop' && (addressChangeBusy||quarantineRecoveryPending||quarantineRows.length))) return;
+  const input=document.getElementById('address-target');
+  if(route!=='address_stop' && !all && (!input.value || !input.checkValidity())) return;
+  const value=Number(input.value);
+  const body=route==='address_stop'?{meter_id:addressMeter}:{meter_id:addressMeter,first:all?0:value,last:all?250:value};
+  try { await call('/api/'+route,body); await refresh(); }
+  catch(e) { document.getElementById('error').textContent=e.message; }
+}
+document.getElementById('address-check').onclick=()=>addressAction('address_search');
+document.getElementById('address-search').onclick=()=>addressAction('address_search',true);
+document.getElementById('address-stop').onclick=()=>addressAction('address_stop');
 function addCell(row, value, heading=false) {
   const cell = document.createElement(heading ? 'th' : 'td');
   cell.textContent = String(value ?? '');
@@ -97,8 +298,8 @@ async function call(path, body) {
   if (!response.ok) throw new Error(localText(data.error) || 'Forespørselen feilet');
   return data;
 }
-function button(label, handler) {
-  const b = document.createElement('button'); b.textContent = label; b.onclick = handler; return b;
+function button(label, handler, disabled=false) {
+  const b = document.createElement('button'); b.textContent = label; b.onclick = handler; b.disabled = disabled; return b;
 }
 function renderActiveDiagnostics(data) {
   const section = document.createElement('section');
@@ -164,11 +365,23 @@ function renderActiveDiagnostics(data) {
   section.append(stamp);
   return section;
 }
+async function refreshAddressStatus() {
+  if(addressRefreshing) return;
+  addressRefreshing=true;
+  try {
+    const state=await call('/api/address_status');
+    if(state.address_search) renderAddressJob(state.address_search);
+    renderAddressChange(state);
+  } catch(e) {document.getElementById('error').textContent=e.message;}
+  finally {addressRefreshing=false;}
+}
 async function refresh() {
   if (refreshing) return;
   refreshing = true;
   try {
     const state = await call('/api/meters');
+    renderQuarantine(state.quarantine,state.address_change_enabled);
+    // Address progress is refreshed independently of registry-backed views.
     if (state.raw_log) {
       const r=state.raw_log;
       document.getElementById('raw-status').textContent = 'Capture: '+(r.enabled?'On':'Off')+'; queued: '+r.queued+'; dropped: '+r.dropped+'; rotations: '+r.rotations+'; storage error: '+r.storage_error;
@@ -190,7 +403,7 @@ async function refresh() {
     const busy = state.diagnostic_capture_running || historySubmitting || state.history.status === 'running' || state.clock.status === 'running' || state.scan_status === 'running';
     document.getElementById('scan').disabled = busy;
     document.getElementById('auto').disabled = busy || state.scan_status !== 'completed' || state.scan_errors.length > 0 || state.available.filter(m => m.supported).length !== 1;
-    const lists = JSON.stringify([busy, state.available, state.selected, state.history_enabled, state.history.status, state.history.manual_meter, state.history.stopping, state.clock_enabled, state.auto_clock_sync, state.clock.status, state.clock_target, state.migrations, state.dst_diagnostics, state.monthly_alarms, state.active_diagnostics, state.diagnostic_capture_enabled, state.diagnostic_capture_status]);
+    const lists = JSON.stringify([busy, state.address_search_enabled, state.available, state.selected, state.history_enabled, state.history.status, state.history.manual_meter, state.history.stopping, state.clock_enabled, state.auto_clock_sync, state.clock.status, state.clock_target, state.migrations, state.dst_diagnostics, state.monthly_alarms, state.active_diagnostics, state.diagnostic_capture_enabled, state.diagnostic_capture_status]);
     if (lists !== lastLists) {
       lastLists = lists;
     for (const name of ['available', 'selected']) {
@@ -200,6 +413,7 @@ async function refresh() {
         line.textContent = `ID ${item.meter_id}, adresse ${item.address}` +
           (item.manufacturer ? `, ${item.manufacturer}` : '');
         if (name === 'selected') {
+          if (state.address_search_enabled) line.append(button('Primary address',()=>openAddressPanel(item)));
           line.append(renderActiveDiagnostics((state.active_diagnostics || {})[item.meter_id] || {}));
           if (state.diagnostic_capture_enabled) {
             const capture = button('Capture frame 5 (test)', async () => {
@@ -323,6 +537,92 @@ document.getElementById('raw-download').onclick=async()=>{
     setTimeout(()=>URL.revokeObjectURL(url),60000);
   } catch(e) { document.getElementById('error').textContent=e.message; }
 };
+
+let pdState={enabled:false};
+let pdSubmitting=false;
+let pdRefreshing=false;
+let pdGeneration=0;
+let pdLastFile=null;
+const pdEl=id=>document.getElementById(id);
+function pdBody(){
+  const numeric=id=>pdEl(id).value.trim()===''?NaN:Number(pdEl(id).value);
+  return {meter_id:pdEl('pd-id').value,manufacturer:pdEl('pd-manufacturer').value,
+    version:numeric('pd-version'),medium:numeric('pd-medium'),number:pdEl('pd-number').value,
+    address:numeric('pd-address')};
+}
+function pdValid(b){
+  return /^[0-9]{8}$/.test(b.meter_id)&&/^[A-Z]{3}$/.test(b.manufacturer)&&
+    /^[0-9]{8}$/.test(b.number)&&Number.isInteger(b.version)&&b.version>=0&&b.version<=254&&
+    Number.isInteger(b.medium)&&b.medium>=0&&b.medium<=254&&Number.isInteger(b.address)&&b.address>=0&&b.address<=250;
+}
+function renderProtocolDiagnostic(state){
+  pdState=state||{enabled:false};
+  const enabled=pdState.enabled===true;
+  const recovery=pdState.recovery_required===true;
+  const busy=pdSubmitting||pdState.status==='running';
+  const pending=pdState.pending;
+  pdEl('protocol-diagnostic-panel').hidden=!enabled&&!recovery;
+  pdEl('protocol-diagnostic-fields').disabled=busy||recovery||!enabled;
+  pdEl('pd-single').disabled=busy||!enabled;
+  pdEl('pd-start').hidden=recovery;
+  pdEl('pd-start').disabled=!enabled||busy||recovery||!pdEl('pd-single').checked||!pdValid(pdBody());
+  pdEl('pd-recover').hidden=!recovery;
+  pdEl('pd-recover').disabled=!enabled||busy||!pending||!pdEl('pd-single').checked;
+  pdEl('pd-status').textContent=(pdState.status||'idle')+(pdState.cleanup_verified===true?' — cleanup verified':'')+
+    (pdState.selected_address!=null?' — selected response address '+pdState.selected_address:'');
+  pdEl('pd-pending').textContent=recovery?(pending?'Pending recovery: ID '+pending.identity.meter_id+
+    ', address '+pending.address+', fabrication number '+pending.number:
+    'Diagnostic recovery required; pending record unavailable or diagnostic disabled. Do not remove the guard.'):'';
+  if(pdState.evidence_file&&pdState.evidence_file!==pdLastFile){
+    pdLastFile=pdState.evidence_file;pdEl('pd-file').value=pdLastFile;
+  }
+  pdEl('pd-download').disabled=!enabled||busy||!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jsonl$/.test(pdEl('pd-file').value);
+}
+async function refreshProtocolDiagnostic(){
+  if(pdRefreshing||pdSubmitting)return;
+  pdRefreshing=true;const generation=pdGeneration;
+  try{const state=await call('/api/address_diagnostic_status');
+    if(generation===pdGeneration&&!pdSubmitting)renderProtocolDiagnostic(state);
+  }catch(e){pdEl('error').textContent=e.message;}
+  finally{pdRefreshing=false;}
+}
+async function submitProtocolDiagnostic(recovery){
+  if(pdSubmitting||pdState.status==='running'||pdState.enabled!==true||
+     !pdEl('pd-single').checked||recovery!==(pdState.recovery_required===true))return;
+  let body=pdBody();
+  if(recovery){
+    const p=pdState.pending;if(!p)return;
+    body={...p.identity,number:p.number,address:p.address,guard_id:p.id};
+  }
+  if(!pdValid(body))return;
+  if(!confirm((recovery?'Recover diagnostic session':'Run isolated protocol test')+
+    ' for ID '+body.meter_id+' at address '+body.address+'? Normal polling may pause.'))return;
+  pdSubmitting=true;pdGeneration++;pdEl('pd-single').checked=false;renderProtocolDiagnostic(pdState);
+  try{const state=await call(recovery?'/api/diagnostic_recover':'/api/address_diagnostic',
+    {...body,confirm:true,single_meter:true,recovery});renderProtocolDiagnostic(state);}
+  catch(e){pdEl('error').textContent=e.message;}
+  finally{pdSubmitting=false;renderProtocolDiagnostic(pdState);await refreshProtocolDiagnostic();}
+}
+async function downloadProtocolEvidence(){
+  if(pdEl('pd-download').disabled)return;
+  if(!confirm('Private diagnostic evidence may contain meter identifiers and measurements. Review before sharing.'))return;
+  const name=pdEl('pd-file').value;
+  try{
+    const response=await fetch(root+'/api/address_diagnostic_evidence/'+encodeURIComponent(name));
+    if(!response.ok)throw new Error('Evidence unavailable');
+    const url=URL.createObjectURL(await response.blob());const link=document.createElement('a');
+    link.href=url;link.download=name;document.body.append(link);link.click();link.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),60000);
+  }catch(e){pdEl('error').textContent=e.message;}
+}
+for(const id of ['pd-id','pd-manufacturer','pd-version','pd-medium','pd-number','pd-address','pd-single','pd-file'])
+  pdEl(id).oninput=()=>renderProtocolDiagnostic(pdState);
+pdEl('pd-start').onclick=()=>submitProtocolDiagnostic(false);
+pdEl('pd-recover').onclick=()=>submitProtocolDiagnostic(true);
+pdEl('pd-download').onclick=downloadProtocolEvidence;
+setInterval(refreshProtocolDiagnostic,1500);refreshProtocolDiagnostic();
+
+setInterval(refreshAddressStatus, 1500); refreshAddressStatus();
 setInterval(refresh, 1500); refreshHistory(); refresh();
 </script></html>"""
 
@@ -363,7 +663,7 @@ def render_page(language):
     return html + "<script>" + prefix + script
 
 
-def serve(registry, config, client, bus_lock, stop, port=8099, history_controller=None, clock_controller=None, raw_log=None):
+def serve(registry, config, client, bus_lock, stop, port=8099, history_controller=None, clock_controller=None, raw_log=None, address_search_job=None, address_change_job=None, address_safety_blocked=None, address_diagnostic_factory=None):
     history_controller = history_controller or HistoryController(
         registry, config, bus_lock, stop,
         on_complete=lambda meter_id, snapshot: publish_history(client, meter_id, snapshot))
@@ -400,6 +700,38 @@ def serve(registry, config, client, bus_lock, stop, port=8099, history_controlle
         with capture_lock:
             return capture_state["status"] == "running"
 
+    admission = OperationAdmission()
+    address_diagnostic_job = address_diagnostic_factory(admission,history_controller.blocked.is_set) if address_diagnostic_factory else None
+    admission.register("address_diagnostic", lambda: address_diagnostic_job is not None and address_diagnostic_job.busy())
+    admission.register("history", lambda: history_controller.snapshot()["status"] == "running")
+    admission.register("clock", lambda: clock_controller.snapshot()["status"] == "running")
+    admission.register("diagnostic_capture", capture_running)
+    admission.register("address_search", lambda: address_search_job is not None and
+                       address_search_job.snapshot()["status"] in ("running", "stopping"))
+    admission.register("address_change", lambda: address_change_job is not None and
+                       address_change_job.snapshot()["status"] == "running")
+    admission.register("scan", lambda: registry.snapshot()["scan_status"] == "running")
+    admission.register("address_safety", lambda: bool(address_safety_blocked and address_safety_blocked()))
+
+    def guard_start(obj, method, name):
+        original = getattr(obj, method)
+        def guarded(*args, **kwargs):
+            with admission.start(name):
+                return original(*args, **kwargs)
+        setattr(obj, method, guarded)
+
+    # The maintenance scheduler uses these same controller instances.
+    guard_start(history_controller, "start", "history")
+    guard_start(history_controller, "start_extended_archive", "history")
+    guard_start(history_controller, "capture_diagnostic_dev", "diagnostic_capture")
+    guard_start(clock_controller, "start", "clock")
+    if address_search_job:
+        guard_start(address_search_job, "start", "address_search")
+    if address_change_job:
+        guard_start(address_change_job, "start", "address_change")
+        guard_start(address_change_job, "recover", "address_recover")
+        guard_start(address_change_job, "quarantine_action", "address_quarantine")
+
     def dst_diagnostics():
         result = {}
         for row in registry.snapshot()["selected"]:
@@ -433,8 +765,39 @@ def serve(registry, config, client, bus_lock, stop, port=8099, history_controlle
             if self.client_address[0] != "172.30.32.2":
                 self._send(403, {"error": "ingress required"})
                 return
+            if self.path.rstrip("/").endswith("/api/address_diagnostic_status"):
+                self._send(200,address_diagnostic_job.snapshot() if address_diagnostic_job else {"enabled":False})
+                return
+            if "/api/address_diagnostic_evidence/" in self.path:
+                try:
+                    if address_diagnostic_job is None:
+                        raise ValueError("diagnostic unavailable")
+                    name=self.path.rsplit("/",1)[-1]
+                    payload=address_diagnostic_job.export(name)
+                except (OSError,ValueError):
+                    self._send(404,{"error":"evidence unavailable"})
+                    return
+                self.send_response(200)
+                self.send_header("Content-Type","application/x-ndjson")
+                self.send_header("Content-Disposition",'attachment; filename="'+name+'"')
+                self.send_header("Cache-Control","no-store")
+                self.send_header("Content-Length",str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+                return
+            if self.path.rstrip("/").endswith("/api/address_status"):
+                self._send(200, {
+                    "address_search_enabled": address_search_job is not None,
+                    "address_change_enabled": address_change_job is not None,
+                    "address_search": address_search_job.snapshot() if address_search_job else None,
+                    "address_change": address_change_job.snapshot() if address_change_job else None})
+                return
             if self.path.rstrip("/").endswith("/api/meters"):
-                self._send(200, {**registry.snapshot(), "history": history_controller.snapshot(),
+                self._send(200, {**registry.snapshot(), "address_search_enabled": address_search_job is not None,
+                                 "address_change_enabled": address_change_job is not None,
+                                 "address_change": address_change_job.snapshot() if address_change_job else None,
+                                 "address_search": address_search_job.snapshot() if address_search_job else None,
+                                 "history": history_controller.snapshot(),
                                  "migrations": {r["meter_id"]: history_controller.migration_status(r["meter_id"]) for r in registry.snapshot()["selected"]},
                                  "raw_log": raw_log.status() if raw_log else None,
                                  "dst_diagnostics": dst_diagnostics(),
@@ -508,12 +871,12 @@ def serve(registry, config, client, bus_lock, stop, port=8099, history_controlle
                 self._send(403, {"error": "ingress required"})
                 return
             route = self.path.rsplit("/", 2)[-1]
-            if route not in ("scan", "select", "auto", "remove", "history", "clock", "migrate", "ack_history", "stop_history", "diagnostic_capture"):
+            if route not in ("scan", "select", "auto", "remove", "history", "clock", "migrate", "ack_history", "stop_history", "diagnostic_capture", "address_search", "address_stop", "address_change", "address_recover", "address_quarantine", "address_diagnostic", "diagnostic_recover"):
                 self._send(404, {"error": "not found"})
                 return
             try:
                 length = int(self.headers.get("Content-Length", "0"))
-                if not 0 <= length <= 256:
+                if not 0 <= length <= 4096:
                     raise ValueError("invalid request length")
                 data = json.loads(self.rfile.read(length) or b"{}")
                 if not isinstance(data, dict):
@@ -521,88 +884,142 @@ def serve(registry, config, client, bus_lock, stop, port=8099, history_controlle
                 meter_id = data.get("meter_id")
                 if meter_id is not None and not isinstance(meter_id, str):
                     raise ValueError("meter_id must be text")
-                if route == "stop_history":
-                    history_controller.request_stop(meter_id)
-                    self._send(200, registry.snapshot())
-                    return
-                if route == "ack_history":
-                    with registry.lock:
-                        if meter_id not in registry.selected:
-                            raise ValueError("meter not selected")
-                    key = "history:" + hashlib.sha256(meter_id.encode()).hexdigest()
-                    ledger = MonthlyRetry("/data/analysis")
-                    ledger.acknowledge(key)
-                    publish_monthly_retry(client, meter_id, ledger.alarm(key))
-                    self._send(200, registry.snapshot())
-                    return
-                if history_controller.blocked.is_set():
-                    raise ValueError("Normal telegram not yet verified")
-                if history_controller.snapshot()["status"] == "running":
-                    raise ValueError("History retrieval already running")
+                if route in ("stop_history", "address_stop", "ack_history"):
+                    self._dispatch(route, meter_id, data)
+                else:
+                    with admission.start(route):
+                        self._dispatch(route, meter_id, data)
+            except (ValueError, KeyError, ConnectionError, OSError) as exc:
+                self._send(400, {"error": str(exc)})
+
+        def _dispatch(self, route, meter_id, data):
+            if route in ("address_diagnostic","diagnostic_recover"):
+                if address_diagnostic_job is None or not address_diagnostic_job.enabled:
+                    raise ValueError("diagnostic not enabled")
+                if data.get("recovery",False) is not (route=="diagnostic_recover"):
+                    raise ValueError("diagnostic route mismatch")
+                address_diagnostic_job.start(data)
+                self._send(202,address_diagnostic_job.snapshot())
+                return
+            if route == "address_quarantine":
+                if address_change_job is None or history_controller.blocked.is_set():
+                    raise ValueError("quarantine action unavailable")
+                address_change_job.quarantine_action(meter_id, data.get("address"),
+                    action=data.get("action"), confirmed=data.get("confirm"),
+                    new_address=data.get("new_address"))
+                self._send(202, address_change_job.snapshot())
+                return
+            if route == "address_recover":
+                if address_change_job is None or history_controller.blocked.is_set():
+                    raise ValueError("address recovery unavailable")
+                address_change_job.recover(meter_id, data.get("transaction_id"), confirmed=data.get("confirm"))
+                self._send(202, address_change_job.snapshot())
+                return
+            if route == "address_change":
+                if address_change_job is None:
+                    raise ValueError("address change not enabled")
+                if (history_controller.blocked.is_set() or history_controller.snapshot()["status"] == "running"
+                        or clock_controller.snapshot()["status"] == "running" or capture_running()
+                        or (address_search_job and address_search_job.snapshot()["status"] in ("running", "stopping"))):
+                    raise ValueError("bus unavailable")
+                address_change_job.start(meter_id, data.get("old_address"), data.get("new_address"),
+                                         confirmed=data.get("confirm"), override=data.get("override", False),
+                                         accepted_risk=data.get("accepted_risk"))
+                self._send(202, address_change_job.snapshot())
+                return
+            if route in ("address_search", "address_stop"):
+                if address_change_job and address_change_job.snapshot()["status"] == "running":
+                    raise ValueError("address change running")
+                if address_search_job is None:
+                    raise ValueError("address search not enabled")
+                if route == "address_stop":
+                    address_search_job.request_stop(meter_id)
+                else:
+                    if history_controller.blocked.is_set() or history_controller.snapshot()["status"] == "running" or clock_controller.snapshot()["status"] == "running" or capture_running():
+                        raise ValueError("bus unavailable")
+                    address_search_job.start(meter_id, data.get("first"), data.get("last"))
+                self._send(202, address_search_job.snapshot())
+                return
+            if route == "stop_history":
+                history_controller.request_stop(meter_id)
+                self._send(200, registry.snapshot())
+                return
+            if route == "ack_history":
+                with registry.lock:
+                    if meter_id not in registry.selected:
+                        raise ValueError("meter not selected")
+                key = "history:" + hashlib.sha256(meter_id.encode()).hexdigest()
+                ledger = MonthlyRetry("/data/analysis")
+                ledger.acknowledge(key)
+                publish_monthly_retry(client, meter_id, ledger.alarm(key))
+                self._send(200, registry.snapshot())
+                return
+            if history_controller.blocked.is_set():
+                raise ValueError("Normal telegram not yet verified")
+            if history_controller.snapshot()["status"] == "running":
+                raise ValueError("History retrieval already running")
+            with capture_lock:
+                if capture_state["status"] == "running":
+                    raise ValueError("diagnostic capture already running")
+            if route == "diagnostic_capture":
+                if config.get("allow_diagnostic_capture") is not True or data.get("confirm") is not True:
+                    raise ValueError("diagnostic capture requires explicit permission and confirmation")
+                if stop.is_set() or clock_controller.snapshot().get("status") == "running":
+                    raise ValueError("bus unavailable")
+                with registry.lock:
+                    if len(registry.selected) != 1 or meter_id not in registry.selected or registry.scan_status == "running":
+                        raise ValueError("one selected meter and idle scanner required")
                 with capture_lock:
                     if capture_state["status"] == "running":
                         raise ValueError("diagnostic capture already running")
-                if route == "diagnostic_capture":
-                    if config.get("allow_diagnostic_capture") is not True or data.get("confirm") is not True:
-                        raise ValueError("diagnostic capture requires explicit permission and confirmation")
-                    if stop.is_set() or clock_controller.snapshot().get("status") == "running":
-                        raise ValueError("bus unavailable")
-                    with registry.lock:
-                        if len(registry.selected) != 1 or meter_id not in registry.selected or registry.scan_status == "running":
-                            raise ValueError("one selected meter and idle scanner required")
-                    with capture_lock:
-                        if capture_state["status"] == "running":
-                            raise ValueError("diagnostic capture already running")
-                        capture_state.update(status="running", evidence=None)
-                    threading.Thread(target=diagnostic_capture, args=(meter_id,), daemon=True).start()
-                    self._send(202, {"status": "running"})
-                    return
-                if route == "scan":
-                    with registry.lock:
-                        if registry.scan_status == "running":
-                            raise ValueError("scan already running")
-                        registry.scan_status = "running"
-                        registry.scan_progress = 0
-                        registry.scan_errors = []
-                        registry.found = {}
-                    threading.Thread(target=scan_bus, args=(config["serial_port"],
-                                     int(config.get("baud", 2400)), registry, bus_lock, stop, history_controller.blocked),
-                                     daemon=True).start()
-                elif route == "migrate":
-                    history_controller.migrate(meter_id)
-                elif route == "history":
-                    if history_controller.migration_status(meter_id) == "complete":
-                        history_controller.start_extended_archive(meter_id,confirmed=data.get("confirm"))
-                    else:
-                        history_controller.start(meter_id, manual=True)
-                elif route == "clock":
-                    if history_controller.migration_status(meter_id) in ("pending", "invalid"):
-                        raise ValueError("migrate saved history before clock synchronization")
-                    if data.get("confirm") is not True:
-                        raise ValueError("clock write requires explicit confirmation")
-                    if data.get("test_dst") is True:
-                        raise ValueError("Experimental DST writes are retired")
-                    clock_controller.start(meter_id)
-                elif route == "select":
-                    registry.select(meter_id)
-                elif route == "auto":
-                    registry.select_auto()
+                    capture_state.update(status="running", evidence=None)
+                threading.Thread(target=diagnostic_capture, args=(meter_id,), daemon=True).start()
+                self._send(202, {"status": "running"})
+                return
+            if route == "scan":
+                with registry.lock:
+                    if registry.scan_status == "running":
+                        raise ValueError("scan already running")
+                    registry.scan_status = "running"
+                    registry.scan_progress = 0
+                    registry.scan_errors = []
+                    registry.found = {}
+                threading.Thread(target=scan_bus, args=(config["serial_port"],
+                                 int(config.get("baud", 2400)), registry, bus_lock, stop, history_controller.blocked),
+                                 daemon=True).start()
+            elif route == "migrate":
+                history_controller.migrate(meter_id)
+            elif route == "history":
+                if history_controller.migration_status(meter_id) == "complete":
+                    history_controller.start_extended_archive(meter_id,confirmed=data.get("confirm"))
                 else:
-                    from mqtt_bridge import cleanup_discovery
-                    with bus_lock, registry.lock:
-                        if meter_id not in registry.selected:
-                            raise ValueError("meter not selected")
-                        from mqtt_bridge import mark_unavailable
-                        result = mark_unavailable(client, meter_id)
-                        if result.rc:
-                            raise ConnectionError("MQTT unavailable; cannot remove meter")
-                        result.wait_for_publish(timeout=5)
-                        registry.remove(meter_id)
-                        cleanup_discovery(client, meter_id)
-                        registry.cleanup_done(meter_id)
-                self._send(200, registry.snapshot())
-            except (ValueError, KeyError, ConnectionError, OSError) as exc:
-                self._send(400, {"error": str(exc)})
+                    history_controller.start(meter_id, manual=True)
+            elif route == "clock":
+                if history_controller.migration_status(meter_id) in ("pending", "invalid"):
+                    raise ValueError("migrate saved history before clock synchronization")
+                if data.get("confirm") is not True:
+                    raise ValueError("clock write requires explicit confirmation")
+                if data.get("test_dst") is True:
+                    raise ValueError("Experimental DST writes are retired")
+                clock_controller.start(meter_id)
+            elif route == "select":
+                registry.select(meter_id)
+            elif route == "auto":
+                registry.select_auto()
+            else:
+                from mqtt_bridge import cleanup_discovery
+                with bus_lock, registry.lock:
+                    if meter_id not in registry.selected:
+                        raise ValueError("meter not selected")
+                    from mqtt_bridge import mark_unavailable
+                    result = mark_unavailable(client, meter_id)
+                    if result.rc:
+                        raise ConnectionError("MQTT unavailable; cannot remove meter")
+                    result.wait_for_publish(timeout=5)
+                    registry.remove(meter_id)
+                    cleanup_discovery(client, meter_id)
+                    registry.cleanup_done(meter_id)
+            self._send(200, registry.snapshot())
 
         def log_message(self, *_args):
             pass

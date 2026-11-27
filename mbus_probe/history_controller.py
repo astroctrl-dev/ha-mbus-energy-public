@@ -17,7 +17,7 @@ from mbus_records import t230_footer
 from monthly_diagnostic import (MonthlyDataError, RestorationError, run as read_months, extract_months, extract_monthly_set_day,
                                 restore_normal_frame, read_response)
 from mbus_probe import read_one, validate
-from ha_measurements import REQUIRED_SENSORS, select_measurements
+from ha_measurements import REQUIRED_SENSORS, select_measurements, verify_normal_layout
 
 LOG = logging.getLogger("mbus.history")
 
@@ -109,17 +109,7 @@ class HistoryController:
             raise ValueError("normal interface restore not acknowledged")
 
     def _verify_recovery(self, decoded, address, meter_id):
-        if decoded.get("address") != address:
-            raise ValueError("normal frame address mismatch")
-        values = select_measurements(decoded, meter_id)
-        # Identify the ordinary frame by its record layout, not by whether
-        # every individual measurement has a usable value. Historical frames
-        # must not clear the guard even if they contain some current values.
-        present = {r.get("kind") for r in decoded.get("records", ())
-                   if r.get("current_record")}
-        missing = REQUIRED_SENSORS - present
-        if missing:
-            raise ValueError("normal frame missing record types: " + ", ".join(sorted(missing)))
+        values = verify_normal_layout(decoded,meter_id,address)
         if REQUIRED_SENSORS - values.keys():
             LOG.warning("Normal frame verified with unavailable measurements: %s",
                         ", ".join(sorted(REQUIRED_SENSORS - values.keys())))

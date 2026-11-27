@@ -32,6 +32,10 @@ _gate = None
 _slot = threading.local()
 
 
+class AddressSafetyBlocked(RuntimeError):
+    """Transmission inhibited by persistent address safety state."""
+
+
 class MissedSlot(RuntimeError):
     """No serial transmission was attempted for this expired poll."""
 
@@ -52,10 +56,12 @@ def poll_slot(target, tolerance=1.0):
 class BusTiming:
     def __init__(self, path="/data/analysis/last_bus_request",
                  monotonic=time.monotonic, wall=time.time, sleep=time.sleep,
-                 *, resume=False, fresh=False, boot_id=None):
+                 *, resume=False, fresh=False, boot_id=None, address_blocked=None, diagnostic_guard=None):
         self.path = Path(path)
         self.monotonic, self.wall, self.sleep = monotonic, wall, sleep
         self.lock = threading.Lock()
+        self.address_blocked = address_blocked
+        self.diagnostic_guard = diagnostic_guard
         # A full startup guard is safe even after wall-clock adjustments or a
         # crash between persistence and serial transmission.
         self.eligible = monotonic() + MIN_INTERVAL
@@ -104,11 +110,31 @@ class BusTiming:
     def ready(self):
         return self.monotonic() >= self.eligible
 
-    def write(self, serial, frame):
+    def check_address_safety(self, permit=None, frame=None):
+        if self.diagnostic_guard is not None:
+            from address_diagnostic import DiagnosticPermit
+            if type(permit) is DiagnosticPermit:
+                if permit.guard is not self.diagnostic_guard or (self.address_blocked is not None and self.address_blocked()):
+                    raise AddressSafetyBlocked("diagnostic safety conflict")
+                permit.check(frame)
+                return
+            if self.diagnostic_guard.blocked():
+                raise AddressSafetyBlocked("diagnostic recovery required")
+        if permit is not None:
+            from address_permit import AddressPermit, FreshAddressPermit, QuarantineProbePermit, QuarantineEnrollmentPermit, PendingPrimaryPermit
+            if type(permit) not in (AddressPermit, FreshAddressPermit, QuarantineProbePermit, QuarantineEnrollmentPermit, PendingPrimaryPermit):
+                raise AddressSafetyBlocked('unrecognized address permit')
+            permit.check(frame)
+            return
+        if self.address_blocked is not None and self.address_blocked():
+            raise AddressSafetyBlocked('address safety state requires reconciliation')
+
+    def write(self, serial, frame, *, permit=None):
         attempted = False
         written = None
         try:
             with self.lock:
+                self.check_address_safety(permit, frame)
                 target = getattr(_slot, 'target', None)
                 if target is not None and (not self.ready() or not slot_open(target, self.wall(), getattr(_slot, 'tolerance', 1.0))):
                     raise MissedSlot('bus not eligible at planned slot')
@@ -134,7 +160,10 @@ class BusTiming:
                 self._persist_resume(None)  # Durable uncertain state before any send.
                 if target is not None and not slot_open(target, self.wall(), getattr(_slot, 'tolerance', 1.0)):
                     raise MissedSlot('durable preparation exceeded planned slot')
+                self.check_address_safety(permit, frame)
                 LOG.info("M-Bus TX ready: %d bytes", len(frame))
+                if permit is not None:
+                    permit.consume(frame)
                 attempted = True
                 try:
                     written = serial.write(frame)
