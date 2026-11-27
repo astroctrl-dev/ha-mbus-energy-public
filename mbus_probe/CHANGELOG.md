@@ -1,3 +1,10 @@
+## v3.0.0-beta.5
+
+- Remove automatic meter selection from the Web UI; manual selection remains.
+- Remove frame 5 test capture, capture status and evidence controls from the ordinary Web UI.
+- Hide completed migration status; retain the migration action when pending.
+- Preserve guarded backend operations and existing diagnostic reporting.
+
 ## v3.0.0-beta.4
 
 - Compact active diagnostics with visible active warning details and expandable source-labelled attributes. Identical values shared by flow and installation views are consolidated; differences remain visible.
