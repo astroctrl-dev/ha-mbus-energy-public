@@ -25,7 +25,7 @@ PAGE = r"""<!doctype html><html lang="no"><meta charset="utf-8"><meta name="view
 <p>Initial readings are normally available within about 60 seconds. If the meter is in a confirmed historical telegram mode, automatic restoration of normal telegram mode may take about three minutes in total. Communication errors may extend this time. The minimum interval between commands is 60 seconds.</p><button id="scan">Søk etter målere</button><button id="auto">Velg eneste ledige automatisk</button>
 <h2>Tilgjengelige målere</h2><div id="available"></div>
 <h2>Etablerte målere</h2><div id="selected"></div><pre id="diagnostic-evidence" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre>
-<section id="protocol-diagnostic-panel" hidden><h2>Address protocol diagnostic (test)</h2><p>Isolated single-meter test only. Normal polling pauses for several minutes. No permanent meter parameter writes are authorized.</p><fieldset id="protocol-diagnostic-fields"><legend>Expected instrument identity</legend><p><label>Meter ID <input id="pd-id" inputmode="numeric" maxlength="8" pattern="[0-9]{8}"></label></p><p><label>Manufacturer <input id="pd-manufacturer" maxlength="3" pattern="[A-Z]{3}"></label></p><p><label>Version <input id="pd-version" type="number" min="0" max="254" step="1"></label> <label>Medium <input id="pd-medium" type="number" min="0" max="254" step="1"></label></p><p><label>Fabrication number <input id="pd-number" inputmode="numeric" maxlength="8" pattern="[0-9]{8}"></label></p><p><label>Current primary address <input id="pd-address" type="number" min="0" max="250" step="1"></label></p></fieldset><p><label><input id="pd-single" type="checkbox"> I confirm only one physical meter and one master are connected.</label></p><button id="pd-start" disabled>Run protocol test</button><button id="pd-recover" hidden disabled>Recover diagnostic session</button><p id="pd-status" role="status"></p><p id="pd-pending"></p><p><label>Evidence filename <input id="pd-file" maxlength="42" placeholder="UUID.jsonl"></label><button id="pd-download" disabled>Download private evidence</button></p></section><section id="quarantine-panel" hidden><h2>Address conflict recovery</h2><p>Normal bus operations are blocked until all affected instruments are verified. No response does not prove an address is free.</p><div id="quarantine-list"></div><p id="quarantine-status" role="status"></p></section><section id="address-recovery" hidden><h2>Address recovery</h2><p id="address-recovery-info" role="status"></p><p>Verify the physical address without repeating the address change.</p><button id="address-recover">Verify actual address</button></section><section id="address-panel" hidden><h2>Primary address</h2><p id="address-meter"></p><label for="address-target">New primary address (0–250)</label> <input id="address-target" type="number" min="0" max="250" step="1"><p><button id="address-check">Check address</button><button id="address-search">Search all addresses</button><button id="address-stop">Stop search</button></p><p id="address-progress" role="status"></p><div id="address-results"></div><p>No response does not guarantee availability. Counts refer to registered meters. A full search can take over four hours at the configured 60-second bus interval.</p><div id="address-write-panel" hidden><label><input type="checkbox" id="address-override" disabled> Accept displayed destination risk</label><p id="address-risk" role="status"></p><button id="address-change">Change address</button><p id="address-change-status" role="status"></p></div><p id="address-write-disabled">Address writing is not enabled in this build.</p></section><h2>Klokke</h2><p>Synkronisering bruker systemtid og valgt tidssone i Configuration. Manuell synkronisering krever bekreftelse; automatisk kontroll starter etter første gyldige måling ved oppstart eller nytt målervalg.</p><p id="clock-status"></p><h2>Analyse</h2><p>Last ned validerte normalavlesninger og lagret månedshistorikk som Excel-fil. Nedlasting leser lagrede data og sender ingen kommando til måleren. Historikk hentes separat med knappen ved den valgte måleren.</p><p>Measurement data logging is controlled separately in Configuration. Disabling capture keeps existing files and history.</p><button id="export">Last ned analyse (.xlsx)</button>
+<section id="protocol-diagnostic-panel" hidden><h2>Address protocol diagnostic (test)</h2><p>Isolated single-meter test only. Normal polling pauses for several minutes. No permanent meter parameter writes are authorized.</p><fieldset id="protocol-diagnostic-fields"><legend>Expected instrument identity</legend><p><label>Meter ID <input id="pd-id" inputmode="numeric" maxlength="8" pattern="[0-9]{8}"></label></p><p><label>Manufacturer <input id="pd-manufacturer" maxlength="3" pattern="[A-Z]{3}"></label></p><p><label>Version <input id="pd-version" type="number" min="0" max="254" step="1"></label> <label>Medium <input id="pd-medium" type="number" min="0" max="254" step="1"></label></p><p><label>Fabrication number <input id="pd-number" inputmode="numeric" maxlength="8" pattern="[0-9]{8}"></label></p><p><label>Current primary address <input id="pd-address" type="number" min="0" max="250" step="1"></label></p></fieldset><p><label><input id="pd-single" type="checkbox"> I confirm only one physical meter and one master are connected.</label></p><button id="pd-start" disabled>Run protocol test</button><button id="pd-recover" hidden disabled>Recover diagnostic session</button><p id="pd-status" role="status"></p><p id="pd-pending"></p><p><label>Evidence filename <input id="pd-file" maxlength="42" placeholder="UUID.jsonl"></label><button id="pd-download" disabled>Download private evidence</button></p></section><section id="quarantine-panel" hidden><h2>Address conflict recovery</h2><p>Normal bus operations are blocked until all affected instruments are verified. No response does not prove an address is free.</p><div id="quarantine-list"></div><p id="quarantine-status" role="status"></p></section><section id="address-recovery" hidden><h2>Address recovery</h2><p id="address-recovery-info" role="status"></p><p>Verify the physical address without repeating the address change.</p><button id="address-recover">Verify actual address</button></section><div id="address-panel-parking"><section id="address-panel" hidden><h2>Primary address</h2><button id="address-close">Close</button><p id="address-meter"></p><label for="address-target">New primary address (0–250)</label> <input id="address-target" type="number" min="0" max="250" step="1"><p><button id="address-check">Check address</button><button id="address-search">Search all addresses</button><button id="address-stop">Stop search</button></p><p id="address-progress" role="status"></p><div id="address-results"></div><p>No response does not guarantee availability. Counts refer to registered meters. Unanswered distinct primary addresses are probed at a minimum two-second interval, after the complete response window. Same-address retries and responses or uncertain communication retain the 60-second guard.</p><div id="address-write-panel" hidden><label><input type="checkbox" id="address-override" disabled> Accept displayed destination risk</label><p id="address-risk" role="status"></p><button id="address-change">Change address</button><p id="address-change-status" role="status"></p></div><p id="address-write-disabled">Address writing is not enabled in this build.</p></section></div><h2>Klokke</h2><p>Synkronisering bruker systemtid og valgt tidssone i Configuration. Manuell synkronisering krever bekreftelse; automatisk kontroll starter etter første gyldige måling ved oppstart eller nytt målervalg.</p><p id="clock-status"></p><h2>Analyse</h2><p>Last ned validerte normalavlesninger og lagret månedshistorikk som Excel-fil. Nedlasting leser lagrede data og sender ingen kommando til måleren. Historikk hentes separat med knappen ved den valgte måleren.</p><p>Measurement data logging is controlled separately in Configuration. Disabling capture keeps existing files and history.</p><button id="export">Last ned analyse (.xlsx)</button>
 <h2>Lagret månedshistorikk</h2><p>First installation: leave all optional switches off and verify ordinary live measurements before enabling additional functions. Initial retrieval reads frames 2 and 3. Subsequent manual retrieval reads missing extended months (frame 4); allow about four minutes per month. The table shows progress for the current job. Regular polling pauses; live values may be stale or temporarily unavailable. Clock synchronization and scanning also respect the interval. Downloads use saved data and do not query the meter.</p><p>Positions indicate the order in the meter archive. A dash means no retrieval has been started in this session. Saved energy values remain visible while extended data is being read.</p><div id="history"></div><h2>Raw telegram diagnostics</h2><p>Local capture may contain meter identifiers and consumption. Enable raw capture in Configuration; restart the app to apply. No extra bus requests.</p><p id="raw-status"></p><button id="raw-download">Download raw text (.txt)</button><p id="status"></p><p id="error" role="alert"></p>
 </main><script>
 const root = location.pathname.replace(/\/$/, '');
@@ -127,6 +127,7 @@ function renderAddressJob(job) {
   document.getElementById('address-check').disabled = running;
   document.getElementById('address-search').disabled = running;
   document.getElementById('address-stop').disabled = !matching || job.status !== 'running';
+  document.getElementById('address-close').disabled = running;
   document.getElementById('address-progress').textContent = matching ? job.status+' – '+job.results.length+'/'+job.total : '';
   const area = document.getElementById('address-results');
   const stale=job.search_id!=null && job.search_id===invalidatedSearch;
@@ -153,7 +154,9 @@ function renderAddressJob(job) {
     }
   }
 }
-function openAddressPanel(item) {
+function openAddressPanel(item, host) {
+  if (addressJob && ['running','stopping'].includes(addressJob.status) && addressJob.meter_id !== item.meter_id) return;
+  if (host) host.append(document.getElementById('address-panel'));
   addressMeter=item.meter_id;
   addressOld=item.address;
   document.getElementById('address-override').checked=false;
@@ -232,6 +235,13 @@ async function addressAction(route, all=false) {
   try { await call('/api/'+route,body); await refresh(); }
   catch(e) { document.getElementById('error').textContent=e.message; }
 }
+document.getElementById('address-close').onclick=()=>{
+  if(addressJob && ['running','stopping'].includes(addressJob.status)) return;
+  const panel=document.getElementById('address-panel');
+  panel.hidden=true;
+  document.getElementById('address-panel-parking').append(panel);
+  addressMeter=null;
+};
 document.getElementById('address-check').onclick=()=>addressAction('address_search');
 document.getElementById('address-search').onclick=()=>addressAction('address_search',true);
 document.getElementById('address-stop').onclick=()=>addressAction('address_stop');
@@ -406,6 +416,11 @@ async function refresh() {
     const lists = JSON.stringify([busy, state.address_search_enabled, state.available, state.selected, state.history_enabled, state.history.status, state.history.manual_meter, state.history.stopping, state.clock_enabled, state.auto_clock_sync, state.clock.status, state.clock_target, state.migrations, state.dst_diagnostics, state.monthly_alarms, state.active_diagnostics, state.diagnostic_capture_enabled, state.diagnostic_capture_status]);
     if (lists !== lastLists) {
       lastLists = lists;
+      const addressPanel=document.getElementById('address-panel');
+      document.getElementById('address-panel-parking').append(addressPanel);
+      if(addressMeter && !state.selected.some(item=>item.meter_id===addressMeter)) {
+        addressPanel.hidden=true; addressMeter=null;
+      }
     for (const name of ['available', 'selected']) {
       const div = document.getElementById(name); div.replaceChildren();
       for (const item of state[name]) {
@@ -413,7 +428,11 @@ async function refresh() {
         line.textContent = `ID ${item.meter_id}, adresse ${item.address}` +
           (item.manufacturer ? `, ${item.manufacturer}` : '');
         if (name === 'selected') {
-          if (state.address_search_enabled) line.append(button('Primary address',()=>openAddressPanel(item)));
+          if (state.address_search_enabled) {
+            const addressHost=document.createElement('div'); addressHost.style.cssText='width:100%;min-width:0';
+            line.append(button('Primary address',()=>openAddressPanel(item,addressHost)), addressHost);
+            if(addressMeter===item.meter_id && !addressPanel.hidden) addressHost.append(addressPanel);
+          }
           line.append(renderActiveDiagnostics((state.active_diagnostics || {})[item.meter_id] || {}));
           if (state.diagnostic_capture_enabled) {
             const capture = button('Capture frame 5 (test)', async () => {

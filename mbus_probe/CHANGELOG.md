@@ -1,3 +1,10 @@
+## v3.0.0-beta.2
+
+- Place the primary address panel immediately below the selected meter's identity, with a close control.
+- Accelerate consecutive unanswered distinct primary-address probes to a minimum two seconds after transmission drain and completion of the full receive window. Retain the 60-second guard for repeated addresses, ordinary operations, responses and uncertain exchanges. Restart retains the conservative global guard.
+- Add automated pacing, failure, restart and UI regression checks.
+- Physical fast-scan timing and mobile layout require validation in an isolated test installation. Physical address writing remains disabled.
+
 ## v3.0.0-beta.1 — diagnostic preview
 
 - Optional address protocol diagnostics in the Web UI, disabled by default.

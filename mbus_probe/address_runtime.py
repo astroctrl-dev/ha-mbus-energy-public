@@ -15,7 +15,7 @@ class ReadOnlyAddressTransport:
         self.config, self.gate, self.bus_lock, self.shutdown = config, gate, bus_lock, shutdown
         self.serial_factory = serial_factory
 
-    def _read_primary(self, address):
+    def _read_primary(self, address, *, discovery=False):
         address = validate_address(address)
         if not self.bus_lock.owned_by_current_thread() or self.shutdown.is_set():
             raise RuntimeError("address probe unavailable")
@@ -27,14 +27,17 @@ class ReadOnlyAddressTransport:
         with factory(self.config["serial_port"], baudrate=int(self.config.get("baud",2400)),
                      bytesize=8, parity="E", stopbits=1, timeout=2, write_timeout=2) as serial:
             serial.reset_input_buffer()
-            if self.gate.write(serial,frame) != len(frame):
+            send = self.gate.write_primary_probe if discovery else self.gate.write
+            if send(serial,frame) != len(frame):
                 raise OSError("partial primary probe")
             raw=receive_window(serial)
             capture("RX",raw)
-            return raw
+        if discovery:
+            self.gate.complete_primary_probe(address, raw)
+        return raw
 
     def check(self, address):
-        return assess_destination(address,{},"",self._read_primary(address),checked=True)
+        return assess_destination(address,{},"",self._read_primary(address, discovery=True),checked=True)
 
     def observe_identity(self, address):
         return self.observe_identity_and_number(address)[0]

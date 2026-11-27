@@ -16,6 +16,7 @@ from contextlib import contextmanager
 
 LOG = logging.getLogger("mbus.bus")
 MIN_INTERVAL = 60.0
+PRIMARY_PROBE_INTERVAL = 2.0
 POLL_SLOT_TOLERANCE = 10.0
 
 
@@ -61,6 +62,12 @@ class BusTiming:
         self.monotonic, self.wall, self.sleep = monotonic, wall, sleep
         self.lock = threading.Lock()
         self.address_blocked = address_blocked
+        # Fast path is deliberately volatile: restart and ordinary traffic
+        # retain the full global guard. Only completed silent primary probes
+        # can authorize a shorter interval for a different primary address.
+        self._probe_times = {}
+        self._silent_probe = None
+        self._pending_probe = None
         self.diagnostic_guard = diagnostic_guard
         # A full startup guard is safe even after wall-clock adjustments or a
         # crash between persistence and serial transmission.
@@ -129,7 +136,22 @@ class BusTiming:
         if self.address_blocked is not None and self.address_blocked():
             raise AddressSafetyBlocked('address safety state requires reconciliation')
 
-    def write(self, serial, frame, *, permit=None):
+    def write_primary_probe(self, serial, frame):
+        if (type(frame) is not bytes or len(frame) != 5 or frame[:2] != b'\x10\x5b'
+                or frame[2] > 250 or frame[3] != (0x5b + frame[2]) & 255 or frame[4] != 0x16):
+            raise ValueError('only exact individually addressed read-only probe permitted')
+        return self.write(serial, frame, _primary_probe=frame[2])
+
+    def complete_primary_probe(self, address, raw):
+        # Called by the exclusive read-only transport only after its full
+        # bounded receive window and successful serial close. A response,
+        # collision, partial exchange or any exception keeps global pacing.
+        with self.lock:
+            if self._pending_probe == address and raw == b'':
+                self._silent_probe = (address, self.monotonic())
+            self._pending_probe = None
+
+    def write(self, serial, frame, *, permit=None, _primary_probe=None):
         attempted = False
         written = None
         try:
@@ -138,8 +160,17 @@ class BusTiming:
                 target = getattr(_slot, 'target', None)
                 if target is not None and (not self.ready() or not slot_open(target, self.wall(), getattr(_slot, 'tolerance', 1.0))):
                     raise MissedSlot('bus not eligible at planned slot')
-                while self.monotonic() < self.eligible:
-                    self.sleep(self.eligible - self.monotonic())
+                eligible = self.eligible
+                if _primary_probe is not None and permit is None and target is None and self._silent_probe is not None:
+                    previous, response_completed = self._silent_probe
+                    if previous != _primary_probe:
+                        eligible = min(eligible, max(response_completed + 0.0,
+                            self.eligible - MIN_INTERVAL + PRIMARY_PROBE_INTERVAL,
+                            self._probe_times.get(_primary_probe, float('-inf')) + MIN_INTERVAL))
+                self._silent_probe = None
+                self._pending_probe = None
+                while self.monotonic() < eligible:
+                    self.sleep(eligible - self.monotonic())
                 self.path.parent.mkdir(parents=True, exist_ok=True)
                 temp = self.path.with_suffix(".tmp")
                 try:
@@ -178,6 +209,14 @@ class BusTiming:
                     completed = self.monotonic()
                     self.eligible = completed + MIN_INTERVAL
                     self._persist_resume(completed)
+                    if _primary_probe is None:
+                        # A global operation (possibly broadcast/selected) resets
+                        # fast discovery and imposes a full bus-wide guard.
+                        self._probe_times.clear()
+                    else:
+                        self._probe_times[_primary_probe] = completed
+                        if written == len(frame):
+                            self._pending_probe = _primary_probe
         finally:
             if attempted:
                 capture("TX", frame, "write_error" if written is None else
