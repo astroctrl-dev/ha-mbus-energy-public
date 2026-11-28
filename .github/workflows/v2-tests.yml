@@ -1,4 +1,4 @@
-name: M-Bus 2.1 validation
+name: M-Bus validation
 on:
   pull_request:
   push:
@@ -39,8 +39,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          grep -Fx 'version: "2.7.2"' mbus_probe/config.yaml
-          if gh release view v2.7.2 >/dev/null 2>&1; then
+          grep -Fx 'version: "3.0.0"' mbus_probe/config.yaml
+          test "$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA" --jq .commit.verification.verified)" = true
+          if gh release view v3.0.0 >/dev/null 2>&1; then
+            test "$(gh api "repos/$GITHUB_REPOSITORY/commits/v3.0.0" --jq .sha)" = "$GITHUB_SHA"
             exit 0
           fi
-          gh release create v2.7.2 --target "$GITHUB_SHA" --latest --title "M-Bus v2.7.2" --notes-file RELEASE-2.7.2.md
+          gh release create v3.0.0 --target "$GITHUB_SHA" --latest --title "M-Bus v3.0.0" --notes-file RELEASE-3.0.0.md
+          test "$(gh api "repos/$GITHUB_REPOSITORY/commits/v3.0.0" --jq .sha)" = "$GITHUB_SHA"
