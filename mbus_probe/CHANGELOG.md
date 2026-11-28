@@ -1,3 +1,7 @@
+## v3.0.0-beta.9
+
+- Experimental Fast scan continues to the next distinct address after a bounded receive window, including ambiguous replies; record anomalies for deferred rechecks. In discovery test mode, a clean full pass needs no repeated identity scan; if anomalies require rechecks, check the current address first. Preserve same-address 60-second cooldown, conservative transport-failure handling, standard search and exit protection. Physical address writing remains disabled.
+
 ## v3.0.0-beta.8
 
 - Optional read-only discovery test, off by default, probes registered primary addresses in normal scan order without changing the meter registry. Test results cannot be selected for address changes.

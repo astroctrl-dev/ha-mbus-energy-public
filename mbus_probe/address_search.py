@@ -160,13 +160,18 @@ def adaptive_search(addresses, registry, meter_id, transport, bus_lock, stop,
             phase_changed("waiting" if pending else "done")
     if state["phase"] in ("waiting","recheck") and not stop.is_set():
         phase_changed("waiting")
-        # Hold exclusive lease while establishing the new full quiet guard.
-        with bus_lock:
-            if not stop.is_set() and hasattr(transport,"begin_quiet_guard"):
-                transport.begin_quiet_guard()
-        # Gate waits before the next actual TX. Keep waiting state until the
-        # first recheck returns; the UI reports this without a false countdown.
-        for address in sorted(pending):
+        # Test scan rechecks the current instrument first, if needed. Its
+        # per-address cooldown is enforced by the transport, not a new timer.
+        # Normal scan retains its existing conservative recheck guard.
+        if not test:
+            with bus_lock:
+                if not stop.is_set() and hasattr(transport,"begin_quiet_guard"):
+                    transport.begin_quiet_guard()
+        with registry.lock:
+            own_address=registry.selected.get(meter_id)
+        if test and pending and own_address in candidates and own_address not in checked:
+            mark_pending(own_address)
+        for address in sorted(pending,key=lambda a: (a!=own_address,a) if test else (False,a)):
             if stop.is_set():
                 break
             row=probe(address,False)

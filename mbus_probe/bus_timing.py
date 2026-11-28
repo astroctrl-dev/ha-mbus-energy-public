@@ -199,16 +199,24 @@ class BusTiming:
         with self.lock:
             self._persist_resume(self.monotonic())
 
-    def complete_primary_probe(self, address, raw):
-        # Called by the exclusive read-only transport only after its full
-        # bounded receive window and successful serial close. A response,
-        # collision, partial exchange or any exception keeps global pacing.
+    def complete_primary_probe(self, address, raw, *, fast_response=False):
+        # Fast discovery records the completed bounded receive window even
+        # when its bytes are ambiguous. Classification/rechecks are separate.
+        # Transport errors never reach this completion path. The shortcut
+        # applies only to a different experimental primary probe.
         with self.lock:
-            if self._pending_probe == address and raw == b'':
-                self._silent_probe = (address, self.monotonic())
-            if self._pending_probe == address:
-                self._probe_times[address]=self.monotonic()
+            matched = self._pending_probe == address
+            completed = self.monotonic()
+            if matched and raw == b'':
+                self._silent_probe = (address, completed)
+            if matched:
+                self._probe_times[address] = completed
             self._pending_probe = None
+            if matched and fast_response is True and raw:
+                self.eligible = max(self.eligible, completed + MIN_INTERVAL)
+                self._normal_candidate = (address, completed)
+                return True
+            return False
 
     def write(self, serial, frame, *, permit=None, _primary_probe=None, _probe_interval=PRIMARY_PROBE_INTERVAL, _probe_quiet=0.0, defer_completion=False, scan_transition=False, normal_address=None):
         attempted = False

@@ -57,8 +57,8 @@ class ReadOnlyAddressTransport:
                 capture("RX",raw)
             self.gate.complete_read_exchange()
             if discovery or final_verification:
-                self.gate.complete_primary_probe(address, raw)
-                if raw:
+                continued = self.gate.complete_primary_probe(address, raw, fast_response=fast_timeout is not None)
+                if raw and not continued:
                     self.gate.invalidate_primary_probe()
         except Exception:
             # Include failed reads, partial TX, and adapter-close failures.

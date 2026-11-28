@@ -228,7 +228,7 @@ class AddressSearchJob:
                         progress,checkpoint=self._fast_checkpoint,phase_callback=phase,test=True)
                 else:
                     result=search_addresses(range(251),self.registry,meter_id,self.transport,self.bus_lock,self,progress,test=True)
-                if not self.is_set():
+                if not self.is_set() and not self.state.get("fast"):
                     phase("known",251,0,len(set(self._context.values())))
                     def identity_progress(row, done, total):
                         with self.lock:
