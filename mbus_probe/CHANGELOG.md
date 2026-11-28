@@ -1,3 +1,11 @@
+## v3.0.0
+
+- Preserve primary address search, Fast scan, result colors and read-only destination checks from beta.10.
+- Disable experimental physical primary-address changes in the running application, including legacy configuration and direct API requests. The production transmission gate rejects address-write permits and parameter-write telegrams other than established clock records.
+- Disable new experimental secondary-address diagnostics and creation of new diagnostic safety markers in production. Recover existing diagnostic sessions through two paced, validated primary reads without requiring a secondary-address ACK. Retain the matching guard on failed verification; persist recovery evidence before release. Primary recovery does not prove secondary deselection.
+- Enforce an explicit primary-only telegram allowlist for normal reads, established clock records and supported historical/diagnostic frame operations.
+- Candidate validation: 590 automated tests passed, including simulated polling/MQTT resumption, direct API denial and storage failure handling. Physical recovery remains unverified. Independent software review approved the tested candidate; full physical MQTT acceptance remains pending. Back up before updating; never downgrade with unresolved safety state.
+
 ## v3.0.0-beta.10
 
 - Experimental address-write runtime for an explicitly attested isolated single-meter test bus. Disabled by default. Requires independently entered instrument identity and device number, fresh matching response, conservative destination checks, single write attempt and journal-based read-only recovery. Physical protocol behavior remains unverified; do not use on a shared bus.

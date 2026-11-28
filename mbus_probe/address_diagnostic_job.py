@@ -8,11 +8,12 @@ from address_telegrams import select_enhanced
 
 
 class AddressDiagnosticJob:
-    def __init__(self,runner,guard,shutdown,history_blocked,enabled=False, recovery_history_blocked=None):
+    def __init__(self,runner,guard,shutdown,history_blocked,enabled=False, recovery_history_blocked=None, recovery_only=False):
         self.runner,self.guard,self.shutdown=runner,guard,shutdown
         self.history_blocked=history_blocked
         self.recovery_history_blocked=recovery_history_blocked or history_blocked
         self.enabled=enabled is True
+        self.recovery_only=recovery_only is True
         self.lock=threading.Lock()
         self.state={"status":"idle"}
 
@@ -42,6 +43,8 @@ class AddressDiagnosticJob:
         recovery=data.get("recovery",False)
         if type(recovery) is not bool:
             raise ValueError("invalid recovery flag")
+        if self.recovery_only and not recovery:
+            raise ValueError("new protocol diagnostic disabled in stable build")
         with self.lock:
             if (self.state["status"]=="running" or self.shutdown.is_set()
                     or (self.recovery_history_blocked() if recovery else self.history_blocked()) or self.guard.blocked()!=recovery):

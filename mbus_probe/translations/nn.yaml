@@ -1,28 +1,4 @@
 configuration:
-  allow_address_write:
-    name: "Tillat eksperimentell adresseskriving"
-    description: "Aktiver berre for særskilt godkjend betatest med éin isolert målar; fysisk protokoll er enno ikkje verifisert."
-  address_test_isolated:
-    name: "Isolert testbuss"
-    description: "Stadfest nøyaktig éin fysisk målar og éin master, ikkje berre éin registrert målar."
-  address_test_meter_id:
-    name: "Målar-ID"
-    description: "Oppgje åtte siffer frå uavhengig stadfesta instrumentidentifikasjon."
-  address_test_manufacturer:
-    name: "Produsent"
-    description: "Oppgje produsentkoden på tre bokstavar."
-  address_test_version:
-    name: "Instrumentversjon"
-    description: "Oppgje verifisert numerisk versjonsbyte."
-  address_test_medium:
-    name: "Medium"
-    description: "Oppgje verifisert numerisk mediumbyte."
-  address_test_device_number:
-    name: "Fabrikasjonsnummer"
-    description: "Oppgje åttesifra nummer stadfesta uavhengig på instrumentet."
-  allow_address_diagnostic:
-    name: "Tillat adresseprotokolldiagnostikk"
-    description: "Aktiver isolert, skriveverna protokolltest berre etter godkjenning."
   allow_diagnostic_capture:
     name: "Tillat diagnostisk testavlesing"
     description: "Tillat manuelt stadfesta testavlesing av ramme 5. Inga automatisk avlesing."
@@ -80,3 +56,4 @@ configuration:
   mqtt_password:
     name: "MQTT-passord"
     description: "Passord for MQTT-autentisering."
+

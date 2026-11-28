@@ -31,7 +31,7 @@ Extended archive retrieval can be stopped at a safe transaction boundary and res
 
 ## Updates and rollback
 
-Version 2.9.2 preserves existing entity IDs and stored history. Existing entity IDs, app slug and stored history are preserved; no data migration is required for upgrades from v2.9.0 or v2.9.1 betas. The application now coordinates M-Bus transmissions using a shared timing gate and skips missed polling slots. Back up app data and settings, update through Settings → Apps, and verify meter selection, MQTT entities and fresh readings. On failure, stop, restore the previous app version and corresponding backup, restart and verify MQTT and normal-frame status. Never run two copies against the same adapter and MQTT identities.
+Version 3.0.0 retains the app slug, existing entity identifiers and stored measurement/history formats. Back up before upgrading, especially from experimental 3.0.0 betas. The application now coordinates M-Bus transmissions using a shared timing gate and skips missed polling slots. Back up app data and settings, update through Settings → Apps, and verify meter selection, MQTT entities and fresh readings. On failure, preserve the data and diagnostic evidence. Do not downgrade or restore an older backup while a diagnostic or address transaction is unresolved. For other failures, stop the app and restore the previous known-good version and corresponding backup only after verifying that no safety state is pending. Never run two copies against the same adapter and MQTT identities.
 
 ## Clock synchronization
 
@@ -73,3 +73,13 @@ Before updating from v2.4.0, back up app data and Home Assistant. Verify entity 
 - Normal-frame restoration is mandatory before ordinary polling resumes.
 
 Physical capture and offline regression tests cover the observed layout. Live automatic scheduling and final Web UI behavior have not yet been verified on hardware. Back up before upgrading; restore the previous app and backup if normal polling cannot be recovered.
+
+## Primary address search and recovery (v3.0.0)
+
+Primary address search (000–250), optional Fast scan, result colors and read-only destination checks are retained. A silent response is not proof that an address is free. Physical primary-address changes and new experimental secondary-address protocol tests are disabled in this version, including with legacy configuration. Ordinary clock synchronization and supported historical-frame operations remain available.
+
+Stable operation cannot create new diagnostic safety markers. Existing beta markers are retained only for controlled recovery. Ordinary communication failures use normal retry handling; history and timing safety remain independent.
+
+If an experimental beta left a diagnostic session pending, back up app data and update normally without uninstalling. In the web UI, use **Recover diagnostic session** with the pending instrument identity, fabrication number and primary address; confirm isolation only if one physical meter and one master are actually connected. Recovery checks two paced primary responses for the expected identity, fabrication number, address and normal telegram layout. It does not require a secondary-address ACK. Successful verification is recorded before removing the matching diagnostic guard. Ordinary polling can then resume without restarting the app. This verifies primary operation, not secondary deselection. If recovery fails, keep the guard and export private evidence; do not delete files or retry address writes. A separate unresolved address-write transaction or history recovery may still block operation.
+
+Validation: 590 automated tests passed on the release candidate, including simulated recovery, MQTT resumption, legacy configuration, API denial and storage failures. Independent software review approved the tested candidate. Physical recovery of a pending beta diagnostic has not yet been verified. Total filesystem failure may prevent durable restoration of a legacy marker; never manually remove an unresolved marker. Private evidence may contain real instrument identifiers; review before sharing.
