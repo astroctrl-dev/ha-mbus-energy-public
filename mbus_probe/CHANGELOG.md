@@ -1,4 +1,12 @@
-## 3.0.0-beta.7 (development candidate)
+## v3.0.0-beta.8
+
+- Optional read-only discovery test, off by default, probes registered primary addresses in normal scan order without changing the meter registry. Test results cannot be selected for address changes.
+- Backend-controlled reservation pauses normal readings, drains in-flight communication, waits at least 60 seconds before search and retains a minimum 60-second exit guard. Unused ready reservations expire after 180 seconds.
+- Preserve initial and conservative recheck evidence and perform final registered identity checks. A silent response is not proof of availability.
+- Show green information when the selected destination equals the current address; keep the change request disabled.
+- Experimental beta for isolated test installations; physical timing and recovery require hardware acceptance. Physical address writing remains disabled.
+
+## v3.0.0-beta.7
 
 - Refine the address request action and invalidate destination evidence when the target changes. Physical address writing remains disabled.
 

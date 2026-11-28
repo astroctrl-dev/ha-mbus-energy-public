@@ -416,6 +416,8 @@ def main():
                                     enabled=config.get("allow_address_diagnostic") is True,
                                     recovery_history_blocked=lambda: history_controller.marker.exists() or
                                     (history_controller.blocked.is_set() and not history_controller.startup_pending))
+    config["_address_test_busy"] = address_search_job.test_reservation.busy
+    config["_address_scan_busy"] = address_search_job.busy
     server = serve(registry, config, client, bus_lock, STOP, raw_log=raw_log,
                    address_diagnostic_factory=diagnostic_factory,
                    address_search_job=address_search_job, address_change_job=address_change_job,
@@ -423,7 +425,6 @@ def main():
     maintenance = MaintenanceSchedule(config, server.clock_controller, server.history_controller, STOP)
     config["_clock_observer"] = maintenance.observe_clock
     config["_tracked_normal_reads"] = True
-    config["_address_scan_busy"] = lambda: address_search_job.snapshot()["status"] in ("running","stopping")
     def valid_round(meter_ids):
         maintenance.on_valid_round(meter_ids)
     try:

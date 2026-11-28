@@ -25,7 +25,7 @@ PAGE = r"""<!doctype html><html lang="no"><meta charset="utf-8"><meta name="view
 <p>Initial readings are normally available within about 60 seconds. If the meter is in a confirmed historical telegram mode, automatic restoration of normal telegram mode may take about three minutes in total. Communication errors may extend this time. The minimum interval between commands is 60 seconds.</p><button id="scan">Søk etter målere</button>
 <h2>Tilgjengelige målere</h2><div id="available"></div>
 <h2>Etablerte målere</h2><div id="selected"></div>
-<section id="protocol-diagnostic-panel" hidden><h2>Address protocol diagnostic (test)</h2><p>Isolated single-meter test only. Normal polling pauses for several minutes. No permanent meter parameter writes are authorized.</p><fieldset id="protocol-diagnostic-fields"><legend>Expected instrument identity</legend><p><label>Meter ID <input id="pd-id" inputmode="numeric" maxlength="8" pattern="[0-9]{8}"></label></p><p><label>Manufacturer <input id="pd-manufacturer" maxlength="3" pattern="[A-Z]{3}"></label></p><p><label>Version <input id="pd-version" type="number" min="0" max="254" step="1"></label> <label>Medium <input id="pd-medium" type="number" min="0" max="254" step="1"></label></p><p><label>Fabrication number <input id="pd-number" inputmode="numeric" maxlength="8" pattern="[0-9]{8}"></label></p><p><label>Current primary address <input id="pd-address" type="number" min="0" max="250" step="1"></label></p></fieldset><p><label><input id="pd-single" type="checkbox"> I confirm only one physical meter and one master are connected.</label></p><button id="pd-start" disabled>Run protocol test</button><button id="pd-recover" hidden disabled>Recover diagnostic session</button><p id="pd-status" role="status"></p><p id="pd-pending"></p><p><label>Evidence filename <input id="pd-file" maxlength="42" placeholder="UUID.jsonl"></label><button id="pd-download" disabled>Download private evidence</button></p></section><section id="quarantine-panel" hidden><h2>Address conflict recovery</h2><p>Normal bus operations are blocked until all affected instruments are verified. No response does not prove an address is free.</p><div id="quarantine-list"></div><p id="quarantine-status" role="status"></p></section><section id="address-recovery" hidden><h2>Address recovery</h2><p id="address-recovery-info" role="status"></p><p>Verify the physical address without repeating the address change.</p><button id="address-recover">Verify actual address</button></section><div id="address-panel-parking"><section id="address-panel" hidden><h2>Primary address</h2><button id="address-close">Close</button><p id="address-meter"></p><label for="address-target">New address (0–250)</label><div class="address-actions"><input id="address-target" type="text" inputmode="numeric" maxlength="3" pattern="[0-9]{1,3}" required><button id="address-check" disabled>Request address change</button></div><p id="address-request-status" role="status"></p><h3>Address search</h3><label><input type="checkbox" id="address-fast" role="switch"> Fast scan</label><p id="address-fast-warning" role="alert" hidden style="color:#b91c1c;font-weight:600">Warning: Fast scanning may cause communication collisions, missed or invalid responses. Verify the selected address before changing it.</p><div class="address-actions"><button id="address-search">New search</button><button id="address-resume" disabled>Resume</button><button id="address-stop">Stop</button></div><p id="address-progress" role="status"></p><div id="address-legend"><span><i style="background:#dcfce7"></i>No response</span><span><i style="background:#fef3c7"></i>Occupied / conflict</span><span><i style="background:#fee2e2"></i>Recheck / unresolved</span><span><i style="background:#cbd5e1"></i>Current address</span><span><i style="background:#f1f5f9"></i>Not scanned</span></div><div id="address-results"></div><p class="address-note">Green: available candidate. Yellow: conflict risk. Red: not selectable. No response does not guarantee availability. Counts refer to registered meters.</p><details class="address-note"><summary>Search timing</summary>Standard search: 2-second interval. Fast scan (experimental at 2400 baud): starts with 200 ms first-byte window and 10 ms quiet pause after a silent exchange; finishes the full pass, waits 60 seconds, then rechecks affected addresses at standard speed. Replies use a full receive window. Request address change waits 60 seconds before each of two conservative checks. No response does not prove availability.</details><div id="address-write-panel" hidden><label><input type="checkbox" id="address-override" disabled> Accept displayed destination risk</label><p id="address-risk" role="status"></p><button id="address-change">Change address</button><p id="address-change-status" role="status"></p></div><p id="address-write-disabled">Address writing is not enabled in this build.</p></section></div><h2>Klokke</h2><p id="clock-status"></p><details class="help-details"><summary>More information</summary><p>Synkronisering bruker systemtid og valgt tidssone i Configuration. Manuell synkronisering krever bekreftelse; automatisk kontroll starter etter første gyldige måling ved oppstart eller nytt målervalg.</p></details>
+<section id="protocol-diagnostic-panel" hidden><h2>Address protocol diagnostic (test)</h2><p>Isolated single-meter test only. Normal polling pauses for several minutes. No permanent meter parameter writes are authorized.</p><fieldset id="protocol-diagnostic-fields"><legend>Expected instrument identity</legend><p><label>Meter ID <input id="pd-id" inputmode="numeric" maxlength="8" pattern="[0-9]{8}"></label></p><p><label>Manufacturer <input id="pd-manufacturer" maxlength="3" pattern="[A-Z]{3}"></label></p><p><label>Version <input id="pd-version" type="number" min="0" max="254" step="1"></label> <label>Medium <input id="pd-medium" type="number" min="0" max="254" step="1"></label></p><p><label>Fabrication number <input id="pd-number" inputmode="numeric" maxlength="8" pattern="[0-9]{8}"></label></p><p><label>Current primary address <input id="pd-address" type="number" min="0" max="250" step="1"></label></p></fieldset><p><label><input id="pd-single" type="checkbox"> I confirm only one physical meter and one master are connected.</label></p><button id="pd-start" disabled>Run protocol test</button><button id="pd-recover" hidden disabled>Recover diagnostic session</button><p id="pd-status" role="status"></p><p id="pd-pending"></p><p><label>Evidence filename <input id="pd-file" maxlength="42" placeholder="UUID.jsonl"></label><button id="pd-download" disabled>Download private evidence</button></p></section><section id="quarantine-panel" hidden><h2>Address conflict recovery</h2><p>Normal bus operations are blocked until all affected instruments are verified. No response does not prove an address is free.</p><div id="quarantine-list"></div><p id="quarantine-status" role="status"></p></section><section id="address-recovery" hidden><h2>Address recovery</h2><p id="address-recovery-info" role="status"></p><p>Verify the physical address without repeating the address change.</p><button id="address-recover">Verify actual address</button></section><div id="address-panel-parking"><section id="address-panel" hidden><h2>Primary address</h2><button id="address-close">Close</button><p id="address-meter"></p><label for="address-target">New address (0–250)</label><div class="address-actions"><input id="address-target" type="text" inputmode="numeric" maxlength="3" pattern="[0-9]{1,3}" required><button id="address-check" disabled>Request address change</button></div><p id="address-request-status" role="status"></p><h3>Address search</h3><label><input type="checkbox" id="address-fast" role="switch"> Fast scan</label><div><label><input type="checkbox" id="address-test" role="switch"> Test: Ignore enabled instruments in search</label></div><p id="address-test-warning" role="alert" hidden style="color:#b91c1c;font-weight:600">Test mode: registered instruments are physically probed. Normal readings are paused.</p><p id="address-test-status" role="status"></p><p id="address-fast-warning" role="alert" hidden style="color:#b91c1c;font-weight:600">Warning: Fast scanning may cause communication collisions, missed or invalid responses. Verify the selected address before changing it.</p><div class="address-actions"><button id="address-search">New search</button><button id="address-resume" disabled>Resume</button><button id="address-stop">Stop</button></div><p id="address-progress" role="status"></p><div id="address-legend"><span><i style="background:#dcfce7"></i>No response</span><span><i style="background:#fef3c7"></i>Occupied / conflict</span><span><i style="background:#fee2e2"></i>Recheck / unresolved</span><span><i style="background:#cbd5e1"></i>Current address</span><span><i style="background:#f1f5f9"></i>Not scanned</span></div><div id="address-results"></div><p class="address-note">Green: available candidate. Yellow: conflict risk. Red: not selectable. No response does not guarantee availability. Counts refer to registered meters.</p><details class="address-note"><summary>Search timing</summary>Standard search: 2-second interval. Fast scan (experimental at 2400 baud): starts with 200 ms first-byte window and 10 ms quiet pause after a silent exchange; finishes the full pass, waits 60 seconds, then rechecks affected addresses at standard speed. Replies use a full receive window. Request address change waits 60 seconds before each of two conservative checks. No response does not prove availability.</details><div id="address-write-panel" hidden><label><input type="checkbox" id="address-override" disabled> Accept displayed destination risk</label><p id="address-risk" role="status"></p><button id="address-change">Change address</button><p id="address-change-status" role="status"></p></div><p id="address-write-disabled">Address writing is not enabled in this build.</p></section></div><h2>Klokke</h2><p id="clock-status"></p><details class="help-details"><summary>More information</summary><p>Synkronisering bruker systemtid og valgt tidssone i Configuration. Manuell synkronisering krever bekreftelse; automatisk kontroll starter etter første gyldige måling ved oppstart eller nytt målervalg.</p></details>
 <h2>Lagret månedshistorikk</h2><p>Retrieval may pause live readings. Allow about four minutes per missing extended month.</p><details class="help-details"><summary>More information</summary><p>First installation: leave all optional switches off and verify ordinary live measurements before enabling additional functions. Initial retrieval reads frames 2 and 3. Subsequent manual retrieval reads missing extended months (frame 4); allow about four minutes per month. The table shows progress for the current job. Regular polling pauses; live values may be stale or temporarily unavailable. Clock synchronization and scanning also respect the interval. Downloads use saved data and do not query the meter.</p><p>Positions indicate the order in the meter archive. A dash means no retrieval has been started in this session. Saved energy values remain visible while extended data is being read.</p></details><div id="history"></div><section id="data-export"><h2>Data export</h2><div class="export-block"><h3>Measurement data</h3><p class="export-note">Export stored measurements and monthly history. Logging is controlled in Configuration.</p><button id="export">Download Excel (.xlsx)</button></div><div class="export-block"><h3>Raw telegrams</h3><p class="export-note">Enable capture in Configuration and restart. May contain private meter data.</p><p id="raw-status" role="status"></p><button id="raw-download">Download raw text (.txt)</button></div></section><p id="status"></p><p id="error" role="alert"></p>
 </main><script>
 const root = location.pathname.replace(/\/$/, '');
@@ -109,6 +109,8 @@ function updateAddressHeader() {
 let recoveryJob = null;
 let addressView = '';
 let addressJob = null;
+let testRequestPending=false;
+function testPhase(){return addressJob?.test_reservation?.phase||'off';}
 const addressLabels = {current_address:'Current address',current_address_conflict:'Current address – conflict',occupied:'Occupied',occupied_multiple:'Occupied – multiple meters',ambiguous:'Possible address conflict',no_response:'Available (no response)',failed:'Check failed',recheck_required:'Recheck required',pending:'Not scanned'};
 function addressChoice(status) {
   if(status==='no_response') return {selectable:true,bg:'#dcfce7',fg:'#166534'};
@@ -133,11 +135,12 @@ function resetAddressRequest() {
 function syncAddressRequest() {
   const input=document.getElementById('address-target'), action=document.getElementById('address-check'), note=document.getElementById('address-request-status');
   const valid=validAddressInput(input), target=Number(input.value);
-  const busy=['running','stopping'].includes(addressJob?.status)||addressChangeBusy||quarantineRecoveryPending||quarantineRows.length>0;
+  const busy=testRequestPending||testPhase()!=='off'||['running','stopping'].includes(addressJob?.status)||addressChangeBusy||quarantineRecoveryPending||quarantineRows.length>0;
   const row=addressJob?.meter_id===addressMeter && addressJob?.search_id===requestEvidenceId && requestTarget===target && addressJob?.total===1 && addressJob?.status==='completed' ? addressJob.results[0]:null;
   requestActionMode='request';
   let label='Request address change', msg='', bg='', fg='', blocked=!addressMeter||!valid||target===addressOld||busy;
-  if(!valid||target===addressOld) {msg='The selected address cannot be used.';fg='#b91c1c';}
+  if(!valid) {msg='The selected address cannot be used.';fg='#b91c1c';}
+  else if(target===addressOld) {msg='Selected address is used by the current instrument.';fg='#166534';}
   else if(busy && addressJob?.total===1) label='Checking address…';
   else if(row && row.address===target) {
     if(row.status==='no_response' && JSON.stringify(row.observations)===JSON.stringify(['no_response','no_response'])) {requestActionMode='accept';label='Accept new address';bg='#15803d';fg='#166534';msg='Both checks completed. No response detected. Physical address writing is disabled in this beta.';}
@@ -157,14 +160,21 @@ function renderAddressJob(job) {
   const matching = job.meter_id === addressMeter;
   const running = ['running','stopping'].includes(job.status);
   const fast=document.getElementById('address-fast');
-  fast.disabled=running;
+  const test=document.getElementById('address-test'), reservation=job.test_reservation||{phase:'off'}, phase=reservation.phase;
+  const reserved=phase!=='off';
+  test.checked=reservation.active===true;
+  test.disabled=testRequestPending||phase==='cleanup'||phase==='cooldown'||phase==='failed'||(running&&!job.test);
+  document.getElementById('address-test-warning').hidden=!reserved;
+  const labels={draining:'Waiting for current communication to finish',waiting:'Safety wait',ready:'Ready to search – reservation expires',scanning:'Test search running',cleanup:'Finishing test safely',cooldown:'Waiting before resuming normal readings',failed:'Test safety fault – controlled restart required'};
+  document.getElementById('address-test-status').textContent=reserved?(labels[phase]||phase)+(reservation.remaining==null?'':' – '+reservation.remaining+' s'):'';
+  fast.disabled=running||testRequestPending;
   if(matching && running && job.total===251) fast.checked=job.fast===true;
   updateFastWarning();
   syncAddressRequest();
-  document.getElementById('address-search').disabled = running;
+  document.getElementById('address-search').disabled = running||testRequestPending||(reserved&&phase!=='ready');
   document.getElementById('address-stop').disabled = !matching || job.status !== 'running';
   document.getElementById('address-close').disabled = running;
-  document.getElementById('address-resume').disabled = !matching || job.can_resume !== true || running;
+  document.getElementById('address-resume').disabled = !matching || job.can_resume !== true || running || reserved || testRequestPending;
   document.getElementById('address-progress').textContent = matching ? job.status+' – '+job.results.length+'/'+job.total+(job.results[0]?.observations?' · Checks: '+job.results[0].observations.join(' / '):'') : '';
   const area = document.getElementById('address-results');
   const stale=job.search_id!=null && job.search_id===invalidatedSearch;
@@ -177,7 +187,7 @@ function renderAddressJob(job) {
   if(matching && !stale && job.phase==='finalizing') document.getElementById('address-progress').textContent='Finishing scan safety checks';
   if(matching && !stale && job.phase==='known') document.getElementById('address-progress').textContent='Verifying registered instruments – '+job.results.length+'/'+job.total;
   if(matching && !stale && job.guard_remaining>0) document.getElementById('address-progress').textContent+=' · Waiting before resuming normal readings – '+job.guard_remaining+' s';
-  const key = JSON.stringify([addressMeter,rows,matching,job.total,stale]);
+  const key = JSON.stringify([addressMeter,rows,matching,job.total,stale,job.test]);
   if (key === addressView) return;
   addressView = key;
   area.replaceChildren();
@@ -187,7 +197,8 @@ function renderAddressJob(job) {
   for(const n of addresses) {
     const row=byAddress.get(n)||{status:'pending'};
     const choice=addressChoice(row.status);
-    const label=addressFormat(n)+' — '+(addressLabels[row.status]||row.status);
+    if(job.test) choice.selectable=false;
+    const label=addressFormat(n)+' — '+(addressLabels[row.status]||row.status)+(row.observed_identity?.meter_id?' · ID '+row.observed_identity.meter_id:'');
     const cell=button(addressFormat(n),()=>{
       if(!choice.selectable) return;
       document.getElementById('address-target').value=String(n);
@@ -277,13 +288,26 @@ function updateFastWarning() {
   document.getElementById('address-fast-warning').hidden=!document.getElementById('address-fast').checked;
 }
 document.getElementById('address-fast').onchange=updateFastWarning;
+document.getElementById('address-test').onchange=async()=>{
+  const test=document.getElementById('address-test');
+  if(testRequestPending) return;
+  const enabled=test.checked;
+  testRequestPending=true;test.disabled=true;
+  document.getElementById('address-search').disabled=true;
+  document.getElementById('address-resume').disabled=true;
+  resetAddressRequest();
+  try {renderAddressJob(await call('/api/address_test',{enabled,...(!enabled?{reservation_id:addressJob?.test_reservation?.reservation_id}:{})}));}
+  catch(e){document.getElementById('error').textContent=e.message;}
+  finally {testRequestPending=false;try {await refresh();} catch(e){document.getElementById('error').textContent=e.message;} }
+};
 async function addressAction(route, all=false, resume=false) {
   if(!addressMeter || (route!=='address_stop' && (addressChangeBusy||quarantineRecoveryPending||quarantineRows.length))) return;
+  if(route!=='address_stop' && (testRequestPending||(testPhase()!=='off'&&(!all||resume||testPhase()!=='ready')))) return;
   const input=document.getElementById('address-target');
   if(route!=='address_stop' && !all && (!validAddressInput(input)||Number(input.value)===addressOld)) return;
   if(all && !resume && addressJob?.meter_id===addressMeter && addressJob.can_resume && !confirm('Start a new search and discard previous results?')) return;
   const value=Number(input.value);
-  const body=route==='address_stop'?{meter_id:addressMeter}:{meter_id:addressMeter,first:all?0:value,last:all?250:value,...(resume?{resume:true}:all?{fast:document.getElementById('address-fast').checked}:{})};
+  const body=route==='address_stop'?{meter_id:addressMeter,search_id:addressJob?.search_id}:{meter_id:addressMeter,first:all?0:value,last:all?250:value,...(resume?{resume:true}:all?{fast:document.getElementById('address-fast').checked,...(testPhase()==='ready'?{test:true,reservation_id:addressJob?.test_reservation?.reservation_id}:{})}:{})};
   try { const result=await call('/api/'+route,body); if(route==='address_search'&&!all){requestEvidenceId=result.search_id;requestTarget=value;} else if(route==='address_search'){resetAddressRequest();} await refresh(); }
   catch(e) { document.getElementById('error').textContent=e.message; }
 }
@@ -783,7 +807,7 @@ def serve(registry, config, client, bus_lock, stop, port=8099, history_controlle
     admission.register("clock", lambda: clock_controller.snapshot()["status"] == "running")
     admission.register("diagnostic_capture", capture_running)
     admission.register("address_search", lambda: address_search_job is not None and
-                       address_search_job.snapshot()["status"] in ("running", "stopping"))
+                       address_search_job.busy())
     admission.register("address_change", lambda: address_change_job is not None and
                        address_change_job.snapshot()["status"] == "running")
     admission.register("scan", lambda: registry.snapshot()["scan_status"] == "running")
@@ -947,7 +971,7 @@ def serve(registry, config, client, bus_lock, stop, port=8099, history_controlle
                 self._send(403, {"error": "ingress required"})
                 return
             route = self.path.rsplit("/", 2)[-1]
-            if route not in ("scan", "select", "auto", "remove", "history", "clock", "migrate", "ack_history", "stop_history", "diagnostic_capture", "address_search", "address_stop", "address_change", "address_recover", "address_quarantine", "address_diagnostic", "diagnostic_recover"):
+            if route not in ("scan", "select", "auto", "remove", "history", "clock", "migrate", "ack_history", "stop_history", "diagnostic_capture", "address_search", "address_stop", "address_test", "address_change", "address_recover", "address_quarantine", "address_diagnostic", "diagnostic_recover"):
                 self._send(404, {"error": "not found"})
                 return
             try:
@@ -960,10 +984,10 @@ def serve(registry, config, client, bus_lock, stop, port=8099, history_controlle
                 meter_id = data.get("meter_id")
                 if meter_id is not None and not isinstance(meter_id, str):
                     raise ValueError("meter_id must be text")
-                if route in ("stop_history", "address_stop", "ack_history"):
+                if route in ("stop_history", "address_stop", "ack_history") or (route == "address_test" and data.get("enabled") is False):
                     self._dispatch(route, meter_id, data)
                 else:
-                    with admission.start(route):
+                    with admission.start("address_search" if route == "address_test" else route):
                         self._dispatch(route, meter_id, data)
             except (ValueError, KeyError, ConnectionError, OSError) as exc:
                 self._send(400, {"error": str(exc)})
@@ -1003,17 +1027,32 @@ def serve(registry, config, client, bus_lock, stop, port=8099, history_controlle
                                          accepted_risk=data.get("accepted_risk"))
                 self._send(202, address_change_job.snapshot())
                 return
+            if route == "address_test":
+                if address_search_job is None or type(data.get("enabled")) is not bool:
+                    raise ValueError("invalid test reservation request")
+                if data["enabled"]:
+                    if history_controller.blocked.is_set():
+                        raise ValueError("bus unavailable")
+                    address_search_job.reserve_test()
+                else:
+                    address_search_job.cancel_test(data.get("reservation_id"))
+                self._send(202, address_search_job.snapshot())
+                return
             if route in ("address_search", "address_stop"):
                 if address_change_job and address_change_job.snapshot()["status"] == "running":
                     raise ValueError("address change running")
                 if address_search_job is None:
                     raise ValueError("address search not enabled")
                 if route == "address_stop":
-                    address_search_job.request_stop(meter_id)
+                    address_search_job.request_stop(meter_id, data.get("search_id"))
                 else:
                     if history_controller.blocked.is_set() or history_controller.snapshot()["status"] == "running" or clock_controller.snapshot()["status"] == "running" or capture_running():
                         raise ValueError("bus unavailable")
-                    if "resume" in data:
+                    if "test" in data:
+                        if data["test"] is not True or "resume" in data:
+                            raise ValueError("invalid test search request")
+                        address_search_job.start(meter_id, data.get("first"), data.get("last"), fast=data.get("fast",False), test=True, reservation_id=data.get("reservation_id"))
+                    elif "resume" in data:
                         address_search_job.start(meter_id, data.get("first"), data.get("last"), resume=data["resume"])
                     elif "fast" in data:
                         address_search_job.start(meter_id, data.get("first"), data.get("last"), fast=data["fast"])

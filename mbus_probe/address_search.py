@@ -6,7 +6,21 @@ probes; ordinary bus work may run between probes. No selection or writes.
 from address_policy import Availability, validate_address
 
 
-def search_addresses(addresses, registry, meter_id, transport, bus_lock, stop, progress=None):
+def _test_probe(address, transport, count, fast=False):
+    """Actual discovery evidence is separate from registered conflict protection."""
+    identity = None
+    try:
+        result, identity = transport.test_observation(address, fast=fast)
+        observed = result.value if isinstance(result, Availability) else "failed"
+    except (OSError, ValueError, RuntimeError):
+        observed = "failed"
+    # Silence at a registered address must never advertise availability.
+    status = "failed" if count and observed == "no_response" else observed
+    return {"address": address, "status": status, "known_meter_count": count or None,
+            "test_observation": observed, "observed_identity": identity}
+
+
+def search_addresses(addresses, registry, meter_id, transport, bus_lock, stop, progress=None, *, test=False):
     candidates = list(dict.fromkeys(validate_address(a) for a in addresses))
     rows = []
     for address in candidates:
@@ -19,7 +33,9 @@ def search_addresses(addresses, registry, meter_id, transport, bus_lock, stop, p
                 known_count = sum(a == address for a in registry.selected.values())
                 occupied = any(k != meter_id and a == address for k, a in registry.selected.items())
                 own = registry.selected.get(meter_id) == address
-            if own:
+            if test:
+                row = _test_probe(address, transport, known_count)
+            elif own:
                 status = "current_address_conflict" if occupied else "current_address"
             elif occupied:
                 status = "occupied_multiple" if known_count > 1 else Availability.OCCUPIED.value
@@ -29,8 +45,9 @@ def search_addresses(addresses, registry, meter_id, transport, bus_lock, stop, p
                     status = result.value if isinstance(result, Availability) else Availability.FAILED.value
                 except (OSError, ValueError, RuntimeError):
                     status = Availability.FAILED.value
-        row = {"address": address, "status": status,
-               "known_meter_count": known_count if known_count else None}
+        if not test:
+            row = {"address": address, "status": status,
+                   "known_meter_count": known_count if known_count else None}
         rows.append(row)
         if progress is not None:
             progress(dict(row), len(rows), len(candidates))
@@ -69,7 +86,7 @@ def affected_addresses(address):
 
 
 def adaptive_search(addresses, registry, meter_id, transport, bus_lock, stop,
-                    progress=None, *, checkpoint=None, phase_callback=None):
+                    progress=None, *, checkpoint=None, phase_callback=None, test=False):
     """Full fast pass, then deduplicated conservative rechecks.
     All pending cells stay red. Resume retains the original observations and
     restarts the full quiet guard before any remaining recheck.
@@ -96,6 +113,8 @@ def adaptive_search(addresses, registry, meter_id, transport, bus_lock, stop,
             with registry.lock:
                 count=sum(a==address for a in registry.selected.values())
                 own=registry.selected.get(meter_id)==address
+            if test:
+                return _test_probe(address, transport, count, fast)
             if own:
                 status="current_address_conflict" if count>1 else "current_address"
             elif count:
@@ -111,9 +130,12 @@ def adaptive_search(addresses, registry, meter_id, transport, bus_lock, stop,
         pending.add(address)
         old=original.get(address,{})
         # Known current and registered occupied addresses never become green.
-        if old.get("status") in ("current_address","current_address_conflict","occupied_multiple","occupied") and old.get("known_meter_count"):
+        if not test and old.get("status") in ("current_address","current_address_conflict","occupied_multiple","occupied") and old.get("known_meter_count"):
             return
-        publish({"address":address,"status":"recheck_required","known_meter_count":old.get("known_meter_count")})
+        row={"address":address,"status":"recheck_required","known_meter_count":old.get("known_meter_count")}
+        if test and old:
+            row["initial_observation"]=dict(old)
+        publish(row)
     if phase=="fast":
         phase_changed("fast")
         for address in candidates:
@@ -151,7 +173,13 @@ def adaptive_search(addresses, registry, meter_id, transport, bus_lock, stop,
             if row is None:
                 break
             old=original.get(address,{})
-            if row["status"]=="no_response" and old.get("status") in ("ambiguous","failed","occupied"):
+            if test:
+                recheck=dict(row)
+                if row["test_observation"]=="no_response" and old.get("test_observation") in ("ambiguous","failed","occupied"):
+                    row=dict(old)
+                row["initial_observation"]=dict(old)
+                row["recheck_observation"]=recheck
+            elif row["status"]=="no_response" and old.get("status") in ("ambiguous","failed","occupied"):
                 # Silence cannot erase an earlier observed reply or uncertainty.
                 row=dict(old)
             pending.remove(address)

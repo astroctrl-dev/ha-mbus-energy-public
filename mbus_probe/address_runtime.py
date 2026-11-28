@@ -75,10 +75,36 @@ class ReadOnlyAddressTransport:
             return self.check(address)
         return assess_destination(address,{},'',self._read_primary(address,discovery=True,fast_timeout=timeout,quiet=quiet),checked=True)
 
+    def test_observation(self, address, *, fast=False):
+        """Classify the actual reply and decode identity from that same exchange."""
+        raw = self._read_primary(address, discovery=True,
+            fast_timeout=.2 if fast and int(self.config.get("baud", 2400)) == 2400 else None)
+        result = assess_destination(address, {}, "", raw, checked=True)
+        identity = None
+        if result.value == "occupied":
+            from dataclasses import asdict
+            from mbus_probe import validate
+            identity = asdict(SecondaryIdentity.from_decoded(validate(raw)))
+        return result, identity
+
     def begin_quiet_guard(self):
         if not self.bus_lock.owned_by_current_thread():
             raise RuntimeError('shared bus lease required')
         self.gate.invalidate_primary_probe()
+
+    def reservation_guard(self):
+        """Establish durable quiet protection under the existing bus lease."""
+        self.begin_quiet_guard()
+        return self.gate.eligible
+
+    def reservation_ready(self):
+        """A countdown alone cannot authorize a new operation."""
+        from bus_timing import AddressSafetyBlocked
+        try:
+            self.gate.check_address_safety()
+        except AddressSafetyBlocked:
+            return False
+        return self.gate.ready() and not self.shutdown.is_set()
 
     def finish_scan(self):
         # Called under the shared bus lease before publishing terminal status.

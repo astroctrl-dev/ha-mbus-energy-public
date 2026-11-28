@@ -211,6 +211,8 @@ class HistoryController:
             return True
         try:
             with self.bus_lock, self.registry.lock:
+                if self.config.get("_address_test_busy", lambda: False)():
+                    return False
                 selected = list(self.registry.selected.items())
                 try:
                     owned = json.loads(self.marker.read_text(encoding="utf-8"))
