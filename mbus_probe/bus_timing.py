@@ -151,6 +151,9 @@ class BusTiming:
         if self.address_blocked is not None and self.address_blocked():
             raise AddressSafetyBlocked('address safety state requires reconciliation')
 
+    def check_transmission_safety(self, permit, frame):
+        self.check_address_safety(permit, frame)
+
     def write_primary_probe(self, serial, frame, *, interval=PRIMARY_PROBE_INTERVAL, quiet=0.0, defer_completion=False, scan_transition=False):
         if type(quiet) not in (int,float) or not math.isfinite(quiet) or not 0 <= quiet <= 2:
             raise ValueError('invalid post-exchange quiet interval')
@@ -278,7 +281,7 @@ class BusTiming:
                 self._persist_resume(None)  # Durable uncertain state before any send.
                 if target is not None and not slot_open(target, self.wall(), getattr(_slot, 'tolerance', 1.0)):
                     raise MissedSlot('durable preparation exceeded planned slot')
-                self.check_address_safety(permit, frame)
+                self.check_transmission_safety(permit, frame)
                 if _primary_probe is not None and _probe_quiet and serial.in_waiting:
                     self.eligible=max(self.eligible,self.monotonic()+MIN_INTERVAL)
                     raise ValueError('unexpected buffered input before transmission')
@@ -325,6 +328,55 @@ class BusTiming:
 
 def shared_timing_active():
     return _gate is not None
+
+
+_SAFETY_ONLY = object()
+
+
+class StableBusTiming(BusTiming):
+    """Production v3.0.0 gate: no permanent primary-address mutation.
+
+    Experimental transport remains available to offline tests only.
+    Ordinary clock writes retain their exact supported record layouts.
+    """
+    def check_transmission_safety(self, permit, frame):
+        if type(frame) is not bytes:
+            raise AddressSafetyBlocked('concrete bytes required before transmission')
+        self.check_address_safety(permit, frame)
+
+    def check_address_safety(self, permit=None, frame=_SAFETY_ONLY):
+        from address_permit import FreshAddressPermit
+        if type(permit) is FreshAddressPermit:
+            raise AddressSafetyBlocked("physical address writing disabled in stable build")
+        if frame is _SAFETY_ONLY:
+            if permit is not None:
+                raise AddressSafetyBlocked('readiness check cannot carry a permit')
+            return super().check_address_safety()
+        # Validate callable frames again after construction. Only the known
+        # primary operations are available in the stable production service.
+        if not callable(frame):
+            allowed = False
+            if type(frame) is bytes and len(frame) == 5 and frame[0] == 0x10:
+                allowed = (frame[1] == 0x5b and frame[2] <= 250
+                           and frame[3] == (frame[1] + frame[2]) & 255 and frame[4] == 0x16)
+            elif type(frame) is bytes and len(frame) >= 9 and frame[0] == 0x68:
+                if (frame[1] == frame[2] and frame[3] == 0x68 and len(frame) == frame[1] + 6
+                        and frame[-1] == 0x16 and sum(frame[4:-2]) & 255 == frame[-2]):
+                    control, address, ci = frame[4:7]
+                    payload = frame[7:-2]
+                    if control == 0x53 and address <= 250:
+                        if ci == 0x51:
+                            allowed = ((len(payload) == 6 and payload[:2] == b"\x04\x6d")
+                                       or (len(payload) == 7 and payload[:3] == b"\x04\xed\x00"))
+                        elif ci == 0x50:
+                            # Normal restore, frame 2/3/5 and 24 monthly archive selectors.
+                            allowed = (payload in (b"", b"\x02", b"\x03", b"\x05")
+                                       or (len(payload) == 1 and 0x31 <= payload[0] <= 0x3f)
+                                       or (len(payload) == 2 and 0x30 <= payload[0] <= 0x38
+                                           and payload[1] == 1))
+            if not allowed:
+                raise AddressSafetyBlocked("telegram not permitted in stable primary-only build")
+        super().check_address_safety(permit, frame)
 
 
 def install_bus_timing(gate):

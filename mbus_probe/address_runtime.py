@@ -345,6 +345,9 @@ def run_isolated_diagnostic(config, registry, gate, bus_lock, shutdown, admissio
     safety flag only; gate still checks independent address safety.
     """
     from address_diagnostic import run_diagnostic, DiagnosticEvidence
+    from bus_timing import StableBusTiming
+    if isinstance(gate, StableBusTiming) and not recovery:
+        raise ValueError('new diagnostic disabled in stable build')
     from address_telegrams import select_enhanced
     if confirmed is not True or single_meter is not True or not isinstance(identity,SecondaryIdentity):
         raise ValueError("explicit isolated diagnostic approval required")
@@ -375,11 +378,41 @@ def run_isolated_diagnostic(config, registry, gate, bus_lock, shutdown, admissio
             from serial import Serial
             factory=Serial
         evidence=DiagnosticEvidence(guard.path.parent/"diagnostic-evidence",identity,number,address,recovery)
-        with factory(config["serial_port"],baudrate=int(config.get("baud",2400)),
-                     bytesize=8,parity="E",stopbits=1,timeout=2,write_timeout=2,
-                     exclusive=True) as serial:
-            result=run_diagnostic(serial,gate,bus_lock,shutdown,identity=identity,
-                number=number,address=address,guard=guard,confirmed=True,
-                single_meter=True,recovery=recovery,owned_lease=True,evidence=evidence)
-            result['evidence_file']=evidence.path.name
-            return result
+        stable=isinstance(gate, StableBusTiming)
+        result={"status":"cleanup_required" if recovery else "failed","cleanup_verified":False}
+        try:
+            with factory(config["serial_port"],baudrate=int(config.get("baud",2400)),
+                         bytesize=8,parity="E",stopbits=1,timeout=2,write_timeout=2,
+                         exclusive=True) as serial:
+                result=run_diagnostic(serial,gate,bus_lock,shutdown,identity=identity,
+                    number=number,address=address,guard=guard,confirmed=True,
+                    single_meter=True,recovery=recovery,owned_lease=True,evidence=evidence,
+                    primary_recovery=stable,defer_guard_finish=stable)
+            if stable:
+                gate.complete_address_exchange()
+                if result["status"]=="primary_verified_pending_close":
+                    if shutdown.is_set() or (gate.address_blocked is not None and gate.address_blocked()):
+                        raise RuntimeError("recovery state changed before completion")
+                    if gate.persistence_failed:
+                        raise RuntimeError("timing persistence failed")
+                    evidence.record("serial_closed",{"guard_id":record["id"]})
+                    evidence.record("cleanup_verified",{"guard_id":record["id"]})
+                    guard.finish(record)
+                    result.update(status="restored",cleanup_verified=True)
+        except (OSError,ValueError,RuntimeError,KeyError,TypeError) as exc:
+            if not stable:
+                raise
+            result.update(status="cleanup_required",cleanup_verified=False,cleanup_error=str(exc))
+            try:
+                gate.complete_address_exchange()
+            except (OSError,ValueError,RuntimeError):
+                pass
+        if stable:
+            try:
+                evidence.record("runtime_result",result)
+            except OSError as exc:
+                result["evidence_error"]=str(exc)
+                if result["cleanup_verified"]:
+                    result["status"]="evidence_failed"
+        result['evidence_file']=evidence.path.name
+        return result

@@ -51,8 +51,11 @@ class DiagnosticGuard:
     def __init__(self,path):
         self.path=Path(path)
         self._fresh_id=None
+        self._storage_failed=False
 
     def blocked(self):
+        if self._storage_failed:
+            return True
         try:
             self.path.stat()
             return True
@@ -91,8 +94,30 @@ class DiagnosticGuard:
         if self.load()!=record:
             raise ValueError("diagnostic guard changed")
         self._fresh_id=None
-        self.path.unlink()
+        # Verify directory durability before removing the pending marker.
         self.sync()
+        self.path.unlink()
+        try:
+            self.sync()
+        except OSError:
+            # Do not resume this process on uncertain storage. Restore the
+            # original marker, not a fresh authorization, wherever possible.
+            self._storage_failed=True
+            try:
+                with self.path.open("x") as stream:
+                    json.dump(record,stream)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                self.sync()
+            except OSError:
+                pass
+            raise
+
+
+class RecoveryOnlyDiagnosticGuard(DiagnosticGuard):
+    """Stable runtime may resolve legacy markers but never create new ones."""
+    def begin(self,identity,number,address):
+        raise AddressSafetyBlocked('new diagnostic safety markers disabled in stable build')
 
 
 class DiagnosticPermit:
@@ -122,7 +147,7 @@ class DiagnosticPermit:
 
 
 def run_diagnostic(serial, gate, bus_lock, shutdown, *, identity, number,
-                   address, guard, confirmed=False, single_meter=False, second_read=False, recovery=False, owned_lease=False, evidence=None):
+                   address, guard, confirmed=False, single_meter=False, second_read=False, recovery=False, owned_lease=False, evidence=None, primary_recovery=False, defer_guard_finish=False):
     if confirmed is not True or single_meter is not True or not isinstance(identity, SecondaryIdentity):
         raise ValueError("explicit isolated diagnostic approval required")
     validate_address(address)
@@ -136,6 +161,10 @@ def run_diagnostic(serial, gate, bus_lock, shutdown, *, identity, number,
         allowed.add(followup)
     if gate.diagnostic_guard is not guard:
         raise ValueError("shared diagnostic guard required")
+    if primary_recovery and (not recovery or evidence is None):
+        raise ValueError('stable primary recovery requires durable evidence')
+    if defer_guard_finish and (not primary_recovery or not owned_lease):
+        raise ValueError('deferred completion requires owned stable recovery lease')
     permit=None
     events=[]
     result={"status":"failed","events":events,"cleanup_verified":False,
@@ -151,11 +180,19 @@ def run_diagnostic(serial, gate, bus_lock, shutdown, *, identity, number,
         event={"stage":stage,"tx":frame.hex(" "),"rx":None,"started_at_utc":datetime.now(timezone.utc).isoformat()}
         events.append(event)
         record("tx_intent",dict(event))
+        if primary_recovery and serial.in_waiting:
+            raise ValueError('unexpected buffered input before recovery')
         serial.reset_input_buffer()
-        if gate.write(serial,frame,permit=permit)!=len(frame):
+        if gate.write(serial,frame,permit=permit, **({'reject_buffered':True,'defer_completion':True} if primary_recovery else {}))!=len(frame):
             raise OSError("partial transmission")
         record("tx_complete",{"stage":stage,"length":len(frame)})
-        raw=receive_window(serial)
+        try:
+            raw=receive_window(serial)
+            if primary_recovery and serial.in_waiting:
+                raise ValueError('unexpected trailing recovery input')
+        finally:
+            if primary_recovery:
+                gate.complete_address_exchange()
         capture("RX",raw)
         event["rx"]=raw.hex(" ")
         event["received_at_utc"]=datetime.now(timezone.utc).isoformat()
@@ -210,13 +247,29 @@ def run_diagnostic(serial, gate, bus_lock, shutdown, *, identity, number,
         finally:
             if selection_attempted:
                 try:
-                    ack("cleanup",reset,True)
-                    inspect(exchange("primary_after",primary,True),True)
-                    record("cleanup_verified",{"guard_id":pending["id"]})
-                    guard.finish(pending)
-                    result["cleanup_verified"]=True
-                    if recovery:
-                        result["status"]="restored"
+                    if primary_recovery:
+                        # Stable application never uses secondary addressing or mutation.
+                        # Prove operational primary communication twice; do not claim
+                        # secondary selection was cleared or physical exclusivity proven.
+                        for stage in ("primary_recovery_first","primary_recovery_second"):
+                            if shutdown.is_set():
+                                raise RuntimeError("recovery cancelled")
+                            inspect(exchange(stage,primary),True)
+                        if shutdown.is_set():
+                            raise RuntimeError("recovery cancelled")
+                        record("primary_recovery_verified",{"guard_id":pending["id"],
+                            "secondary_state":"not_verified","scope":"stable_primary_only"})
+                    else:
+                        ack("cleanup",reset,True)
+                        inspect(exchange("primary_after",primary,True),True)
+                    if defer_guard_finish:
+                        result["status"]="primary_verified_pending_close"
+                    else:
+                        record("cleanup_verified",{"guard_id":pending["id"]})
+                        guard.finish(pending)
+                        result["cleanup_verified"]=True
+                        if recovery:
+                            result["status"]="restored"
                 except (OSError,ValueError,RuntimeError,KeyError,TypeError) as exc:
                     result["status"]="cleanup_required"
                     result["cleanup_error"]=str(exc)

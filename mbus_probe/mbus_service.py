@@ -364,9 +364,10 @@ def main():
         # Conservative bus-wide quarantine until targeted recovery is verified.
         with registry.lock:
             return journal.blocked() or registry.persistence_failed or bool(registry.quarantined)
-    from address_diagnostic import DiagnosticGuard
-    diagnostic_guard = DiagnosticGuard('/data/address-diagnostic.json')
-    timing = BusTiming(resume=True, fresh=fresh, address_blocked=address_blocked, diagnostic_guard=diagnostic_guard)
+    from address_diagnostic import RecoveryOnlyDiagnosticGuard
+    diagnostic_guard = RecoveryOnlyDiagnosticGuard('/data/address-diagnostic.json')
+    from bus_timing import StableBusTiming
+    timing = StableBusTiming(resume=True, fresh=fresh, address_blocked=address_blocked, diagnostic_guard=diagnostic_guard)
     install_bus_timing(timing)
     bus_lock = OwnedBusLock()
     import paho.mqtt.client as mqtt
@@ -409,16 +410,17 @@ def main():
     config["_frame5_layout_approved"] = True
     config["_diagnostic_runtime"] = DiagnosticRuntime(
         root="/data/analysis" if config.get("_frame5_layout_approved") is True else None)
-    from address_runtime import build_read_only_jobs, build_experimental_change_job
+    from address_runtime import build_read_only_jobs
+    # Stable build never installs an experimental address mutation job.
     address_search_job, address_change_job = build_read_only_jobs(config,registry,timing,bus_lock,STOP)
-    address_change_job = build_experimental_change_job(config,registry,timing,journal,bus_lock,STOP)
     def diagnostic_factory(admission,history_blocked):
         from address_diagnostic_job import AddressDiagnosticJob
         from address_runtime import run_isolated_diagnostic
         def runner(**kwargs):
             return run_isolated_diagnostic(config,registry,timing,bus_lock,STOP,admission,**kwargs)
         return AddressDiagnosticJob(runner,diagnostic_guard,STOP,history_blocked,
-                                    enabled=config.get("allow_address_diagnostic") is True,
+                                    enabled=diagnostic_guard.blocked(),
+                                    recovery_only=True,
                                     recovery_history_blocked=lambda: history_controller.marker.exists() or
                                     (history_controller.blocked.is_set() and not history_controller.startup_pending))
     config["_address_test_busy"] = address_search_job.test_reservation.busy
