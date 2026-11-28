@@ -1,3 +1,7 @@
+## 3.0.0-beta.7 (development candidate)
+
+- Refine the address request action and invalidate destination evidence when the target changes. Physical address writing remains disabled.
+
 ## v3.0.0-beta.6
 
 - Optional experimental Fast scan, off by default. Standard search retains the two-second silent-probe interval.

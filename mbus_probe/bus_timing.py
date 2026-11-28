@@ -67,6 +67,8 @@ class BusTiming:
         # retain the full global guard. Only completed silent primary probes
         # can authorize a shorter interval for a different primary address.
         self._probe_times = {}
+        self._normal_candidate = None
+        self._normal_pending = None
         self._silent_probe = None
         self._pending_probe = None
         self.diagnostic_guard = diagnostic_guard
@@ -149,7 +151,7 @@ class BusTiming:
         if self.address_blocked is not None and self.address_blocked():
             raise AddressSafetyBlocked('address safety state requires reconciliation')
 
-    def write_primary_probe(self, serial, frame, *, interval=PRIMARY_PROBE_INTERVAL, quiet=0.0, defer_completion=False):
+    def write_primary_probe(self, serial, frame, *, interval=PRIMARY_PROBE_INTERVAL, quiet=0.0, defer_completion=False, scan_transition=False):
         if type(quiet) not in (int,float) or not math.isfinite(quiet) or not 0 <= quiet <= 2:
             raise ValueError('invalid post-exchange quiet interval')
         if type(interval) not in (int,float) or not math.isfinite(interval) or not 0.2 <= interval <= PRIMARY_PROBE_INTERVAL:
@@ -157,14 +159,38 @@ class BusTiming:
         if (type(frame) is not bytes or len(frame) != 5 or frame[:2] != b'\x10\x5b'
                 or frame[2] > 250 or frame[3] != (0x5b + frame[2]) & 255 or frame[4] != 0x16):
             raise ValueError('only exact individually addressed read-only probe permitted')
-        return self.write(serial, frame, _primary_probe=frame[2], _probe_interval=interval, _probe_quiet=quiet, defer_completion=defer_completion)
+        return self.write(serial, frame, _primary_probe=frame[2], _probe_interval=interval, _probe_quiet=quiet, defer_completion=defer_completion, scan_transition=scan_transition)
+
+    def complete_normal_read(self, address, raw, expected_meter_id):
+        from mbus_probe import validate
+        from address_policy import SecondaryIdentity
+        with self.lock:
+            pending=self._normal_pending
+            self._normal_pending=None
+            try:
+                decoded=validate(raw)
+                identity=SecondaryIdentity.from_decoded(decoded)
+                valid=(pending==address and decoded.get('address')==address and identity.meter_id==expected_meter_id)
+            except (ValueError,TypeError,IndexError):
+                valid=False
+            completed=self.monotonic()
+            self.eligible=max(self.eligible,completed+MIN_INTERVAL)
+            self._persist_resume(completed)
+            self._normal_candidate=(address,completed) if valid else None
+            if valid:
+                self._probe_times[address]=completed
 
     def invalidate_primary_probe(self):
         with self.lock:
             self._silent_probe=None
             self._pending_probe=None
+            self._normal_candidate=None
+            self._normal_pending=None
             self.eligible=max(self.eligible,self.monotonic()+MIN_INTERVAL)
             self._persist_resume(self.eligible-MIN_INTERVAL)
+
+    def remaining_guard(self):
+        return max(0.0,self.eligible-self.monotonic())
 
     def complete_read_exchange(self):
         # Called only after serial RX and close completed under the shared lease.
@@ -180,9 +206,11 @@ class BusTiming:
         with self.lock:
             if self._pending_probe == address and raw == b'':
                 self._silent_probe = (address, self.monotonic())
+            if self._pending_probe == address:
+                self._probe_times[address]=self.monotonic()
             self._pending_probe = None
 
-    def write(self, serial, frame, *, permit=None, _primary_probe=None, _probe_interval=PRIMARY_PROBE_INTERVAL, _probe_quiet=0.0, defer_completion=False):
+    def write(self, serial, frame, *, permit=None, _primary_probe=None, _probe_interval=PRIMARY_PROBE_INTERVAL, _probe_quiet=0.0, defer_completion=False, scan_transition=False, normal_address=None):
         attempted = False
         written = None
         try:
@@ -198,6 +226,16 @@ class BusTiming:
                         eligible = min(eligible, max(response_completed + _probe_quiet,
                             self.eligible - MIN_INTERVAL + _probe_interval,
                             self._probe_times.get(_primary_probe, float('-inf')) + MIN_INTERVAL))
+                if (_primary_probe is not None and scan_transition and permit is None and target is None
+                        and self._normal_candidate is not None):
+                    previous, completed=self._normal_candidate
+                    if previous!=_primary_probe:
+                        eligible=min(eligible,max(completed+max(.01,_probe_quiet),
+                            self._probe_times.get(_primary_probe,float('-inf'))+MIN_INTERVAL))
+                if _primary_probe is not None:
+                    eligible=max(eligible,self._probe_times.get(_primary_probe,float('-inf'))+MIN_INTERVAL)
+                self._normal_candidate=None
+                self._normal_pending=None
                 self._silent_probe = None
                 self._pending_probe = None
                 while self.monotonic() < eligible:
@@ -250,6 +288,8 @@ class BusTiming:
                         # A global operation (possibly broadcast/selected) resets
                         # fast discovery and imposes a full bus-wide guard.
                         self._probe_times.clear()
+                        if normal_address is not None and written==len(frame) and frame==bytes((0x10,0x5b,normal_address,(0x5b+normal_address)&255,0x16)):
+                            self._normal_pending=normal_address
                     else:
                         self._probe_times[_primary_probe] = completed
                         if written == len(frame):
@@ -269,7 +309,17 @@ def install_bus_timing(gate):
     _gate = gate
 
 
-def write_frame(serial, frame):
+def write_frame(serial, frame, **kwargs):
     if _gate is None:
         return serial.write(frame() if callable(frame) else frame)
-    return _gate.write(serial, frame)
+    return _gate.write(serial, frame, **kwargs)
+
+
+def complete_normal_read(address, raw, expected_meter_id):
+    if _gate is not None:
+        _gate.complete_normal_read(address,raw,expected_meter_id)
+
+
+def invalidate_normal_read():
+    if _gate is not None:
+        _gate.invalidate_primary_probe()

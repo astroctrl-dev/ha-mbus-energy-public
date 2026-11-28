@@ -52,13 +52,16 @@ def validate(frame):
 
 @operation("normal_read")
 @receive
-def read_one(port, baud, address, timeout, first_byte_timeout=None):
+def read_one(port, baud, address, timeout, first_byte_timeout=None, *, tracked_normal=False):
     import serial
     tx = request(address)
     with serial.Serial(port, baudrate=baud, bytesize=8, parity="E", stopbits=1,
                        timeout=timeout, write_timeout=timeout) as ser:
         ser.reset_input_buffer()
-        write_frame(ser, tx)
+        if tracked_normal:
+            write_frame(ser,tx,defer_completion=True,normal_address=address)
+        else:
+            write_frame(ser, tx)
         ser.flush()
         if first_byte_timeout is not None:
             ser.timeout = first_byte_timeout
@@ -74,7 +77,10 @@ def read_one(port, baud, address, timeout, first_byte_timeout=None):
             head = first + ser.read(3)
             if len(head) != 4:
                 return tx, head
-            return tx, head + ser.read(head[1] + 2)
+            raw=head+ser.read(head[1]+2)
+            if tracked_normal and ser.in_waiting:
+                raise ValueError('extra buffered bytes after normal response')
+            return tx,raw
         return tx, first
 
 def main():

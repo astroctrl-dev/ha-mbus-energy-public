@@ -161,3 +161,29 @@ def adaptive_search(addresses, registry, meter_id, transport, bus_lock, stop,
         if not pending and not stop.is_set():
             phase_changed("done")
     return {"results":[rows[a] for a in sorted(rows)],"cancelled":stop.is_set(),"total":len(candidates)}
+
+
+def verify_known_addresses(addresses, registry, meter_id, transport, bus_lock, stop, progress):
+    """Read registered destinations last; never infer exclusivity from one reply."""
+    for address in addresses:
+        if stop.is_set():
+            break
+        with bus_lock:
+            if stop.is_set():
+                break
+            with registry.lock:
+                peers={k for k,a in registry.selected.items() if a==address}
+                expected={k:v for k,v in getattr(registry,"identities",{}).items() if k in peers}
+            if not peers:
+                status="failed"
+            else:
+                try:
+                    observed=getattr(transport,'observe_final_identity',transport.observe_identity)(address)
+                    match=observed.meter_id in peers and (observed.meter_id not in expected or expected[observed.meter_id]==observed)
+                    if len(peers)>1 or not match:
+                        status="current_address_conflict" if meter_id in peers else "occupied_multiple"
+                    else:
+                        status="current_address" if meter_id in peers else "occupied"
+                except (OSError,ValueError,RuntimeError):
+                    status="current_address_conflict" if meter_id in peers else "failed"
+            progress({"address":address,"status":status,"known_meter_count":len(peers) or None},0,0)

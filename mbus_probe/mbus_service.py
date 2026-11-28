@@ -115,10 +115,23 @@ def load_config(path="/data/options.json"):
 
 
 def poll_once(config, client):
-    tx, rx = read_one(config.get("serial_port", "/dev/ttyUSB0"),
-                      int(config.get("baud", 2400)),
-                      int(config.get("address", 0)), timeout=4)
-    return publish_normal(config,client,validate(rx))
+    tracked=config.get("_tracked_normal_reads") is True
+    address=int(config.get("address",0))
+    from bus_timing import complete_normal_read, invalidate_normal_read
+    try:
+        tx,rx=read_one(config.get("serial_port","/dev/ttyUSB0"),
+                       int(config.get("baud",2400)),address,timeout=4,
+                       **({"tracked_normal":True} if tracked else {}))
+        decoded=validate(rx)
+        if tracked:
+            complete_normal_read(address,rx,config["meter_id"])
+    except MissedSlot:
+        raise
+    except Exception:
+        if tracked:
+            invalidate_normal_read()
+        raise
+    return publish_normal(config,client,decoded)
 
 
 def publish_normal(config,client,decoded,read_at_utc=None):
@@ -278,6 +291,8 @@ def run(config, client, registry=None, bus_lock=None, history_controller=None,
                         with registry.lock:
                             if registry.selected.get(row["meter_id"]) != row["address"]:
                                 continue
+                    if config.get("_address_scan_busy",lambda:False)():
+                        continue
                     priority = timing is not None and row["meter_id"] not in attempted_meters
                     tolerance = slot_tolerance(config.get('read_before_full_hour', False), target)
                     if timing and not priority and (not timing.ready() or not slot_open(target, time.time(), tolerance)):
@@ -407,6 +422,8 @@ def main():
                    history_controller=history_controller, address_safety_blocked=lambda: address_blocked() or diagnostic_guard.blocked())
     maintenance = MaintenanceSchedule(config, server.clock_controller, server.history_controller, STOP)
     config["_clock_observer"] = maintenance.observe_clock
+    config["_tracked_normal_reads"] = True
+    config["_address_scan_busy"] = lambda: address_search_job.snapshot()["status"] in ("running","stopping")
     def valid_round(meter_ids):
         maintenance.on_valid_round(meter_ids)
     try:

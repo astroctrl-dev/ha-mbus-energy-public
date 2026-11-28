@@ -14,8 +14,9 @@ class ReadOnlyAddressTransport:
     def __init__(self, config, gate, bus_lock, shutdown, serial_factory=None):
         self.config, self.gate, self.bus_lock, self.shutdown = config, gate, bus_lock, shutdown
         self.serial_factory = serial_factory
+        self.scan_guard_deadline = None
 
-    def _read_primary(self, address, *, discovery=False, fast_timeout=None, quiet=0.01):
+    def _read_primary(self, address, *, discovery=False, fast_timeout=None, quiet=0.01, final_verification=False):
         address = validate_address(address)
         if not self.bus_lock.owned_by_current_thread() or self.shutdown.is_set():
             raise RuntimeError("address probe unavailable")
@@ -32,7 +33,11 @@ class ReadOnlyAddressTransport:
                     if serial.in_waiting:
                         self.gate.invalidate_primary_probe()
                         raise ValueError('unexpected buffered input before probe')
-                    written=self.gate.write_primary_probe(serial,frame,interval=fast_timeout,quiet=quiet,defer_completion=True)
+                    written=self.gate.write_primary_probe(serial,frame,interval=fast_timeout,quiet=quiet,defer_completion=True,scan_transition=True)
+                elif final_verification:
+                    if serial.in_waiting:
+                        raise ValueError('unexpected buffered input before final verification')
+                    written=self.gate.write_primary_probe(serial,frame,quiet=quiet,defer_completion=True)
                 else:
                     serial.reset_input_buffer()
                     send = self.gate.write_primary_probe if discovery else self.gate.write
@@ -51,7 +56,7 @@ class ReadOnlyAddressTransport:
                         raise ValueError('extra buffered input')
                 capture("RX",raw)
             self.gate.complete_read_exchange()
-            if discovery:
+            if discovery or final_verification:
                 self.gate.complete_primary_probe(address, raw)
                 if raw:
                     self.gate.invalidate_primary_probe()
@@ -75,9 +80,28 @@ class ReadOnlyAddressTransport:
             raise RuntimeError('shared bus lease required')
         self.gate.invalidate_primary_probe()
 
+    def finish_scan(self):
+        # Called under the shared bus lease before publishing terminal status.
+        self.begin_quiet_guard()
+        self.scan_guard_deadline = self.gate.eligible
+
+    def remaining_guard(self):
+        if self.scan_guard_deadline is None:
+            return 0.0
+        return max(0.0,self.scan_guard_deadline-self.gate.monotonic())
+
     def check_conservative(self, address):
         self.begin_quiet_guard()
         return assess_destination(address,{},'',self._read_primary(address),checked=True)
+
+    def observe_final_identity(self,address):
+        from mbus_probe import validate
+        raw=self._read_primary(address,final_verification=True)
+        decoded=validate(raw)
+        identity=SecondaryIdentity.from_decoded(decoded)
+        if decoded.get('address')!=address:
+            raise ValueError('primary response address mismatch')
+        return identity
 
     def observe_identity(self, address):
         return self.observe_identity_and_number(address)[0]
