@@ -148,6 +148,162 @@ def build_read_only_jobs(config, registry, gate, bus_lock, shutdown, *, serial_f
     return AddressSearchJob(registry,transport,bus_lock,shutdown), None
 
 
+
+def build_experimental_change_job(config, registry, gate, journal, bus_lock, shutdown, *, serial_factory=None):
+    """Single-meter beta: operator-attested topology, independently entered label.
+    
+    Configuration is an operator attestation, not measured proof of topology.
+    Every transaction still requires fresh exact identity and fabrication number.
+    """
+    if config.get("address_test_isolated") is not True:
+        return None
+    try:
+        import re
+        identity = SecondaryIdentity(config.get("address_test_meter_id"),
+            config.get("address_test_manufacturer"), config.get("address_test_version"),
+            config.get("address_test_medium"))
+        number = config.get("address_test_device_number")
+        if not isinstance(number,str) or not re.fullmatch(r"[0-9]{8}",number):
+            return None
+    except (ValueError,TypeError):
+        return None
+
+    def qualified(meter_id,address):
+        with registry.lock:
+            if (shutdown.is_set() or registry.persistence_failed or registry.quarantined
+                    or meter_id != identity.meter_id or set(registry.selected) != {meter_id}
+                    or registry.identities.get(meter_id,identity) != identity):
+                return False
+            if journal.blocked():
+                try:
+                    intent=journal.load()
+                    return (intent is not None and intent.identity==identity
+                            and intent.old_address==address
+                            and registry.selected[meter_id] in (intent.old_address,intent.new_address))
+                except (ValueError,OSError,TypeError,KeyError):
+                    return False
+            return registry.selected[meter_id]==address
+
+    def exclusive(observed, device_number, raw):
+        # Physical isolation is explicitly attested, not inferred from an ACK.
+        return (observed==identity and device_number==number
+                and reported_device_number(raw,identity)==number
+                and config.get("address_test_isolated") is True
+                and set(registry.selected)=={identity.meter_id})
+
+    return build_qualified_change_job(config,registry,gate,journal,bus_lock,shutdown,
+        qualification=qualified,serial_resolver=lambda i:number if i==identity else None,
+        exclusivity=exclusive,serial_factory=serial_factory, enrollment_identity=identity)
+
+
+def build_qualified_change_job(config, registry, gate, journal, bus_lock, shutdown,
+                               *, qualification=None, serial_resolver=None,
+                               exclusivity=None, serial_factory=None, enrollment_identity=None):
+    """Runtime assembly boundary; never infer qualification from configuration."""
+    if not all(callable(x) for x in (qualification,serial_resolver,exclusivity)):
+        return None
+    if config.get("allow_address_write") is not True and not journal.blocked():
+        return None
+    from address_change_job import AddressChangeJob
+    controller=AddressTransactionRuntime(config,registry,gate,journal,bus_lock,shutdown,
+        qualification=qualification,serial_resolver=serial_resolver,
+        exclusivity=exclusivity,serial_factory=serial_factory, enrollment_identity=enrollment_identity)
+    return AddressChangeJob(controller,shutdown,first_write_admission=controller.admission)
+
+
+class AddressTransactionRuntime:
+    """Qualified transaction adapter. One exclusive serial session per operation.
+
+    No default qualification or exclusivity provider is available. Production
+    must not construct this adapter until the physical evidence is accepted.
+    """
+    def __init__(self, config, registry, gate, journal, bus_lock, shutdown,
+                 *, qualification, serial_resolver, exclusivity, serial_factory=None, enrollment_identity=None):
+        from first_write_admission import FirstWriteAdmission
+        if not all(callable(x) for x in (qualification,serial_resolver,exclusivity)):
+            raise ValueError("independent evidence providers required")
+        self.config,self.registry,self.gate,self.journal=config,registry,gate,journal
+        self.bus_lock,self.shutdown=bus_lock,shutdown
+        self.qualification,self.serial_resolver,self.exclusivity=qualification,serial_resolver,exclusivity
+        self.serial_factory=serial_factory
+        self.enrollment_identity=enrollment_identity
+        self.admission=FirstWriteAdmission(config.get("allow_address_write") is True,qualification)
+        self.destination_evidence=None
+        self.failed=False
+
+    def _execute(self, operation, meter_id, old_address):
+        from address_controller import AddressController
+        from address_transport import CandidateTransport
+        with self.bus_lock, self.registry.lock:
+            if self.shutdown.is_set() or self.qualification(meter_id,old_address) is not True:
+                raise ValueError("qualified isolated operation required")
+            factory=self.serial_factory
+            if factory is None:
+                from serial import Serial
+                factory=Serial
+            # Preserve full pacing after the final receive/close, including faults.
+            try:
+                self.gate.invalidate_primary_probe()
+                with factory(self.config["serial_port"],baudrate=int(self.config.get("baud",2400)),
+                             bytesize=8,parity="E",stopbits=1,timeout=2,write_timeout=2,
+                             exclusive=True) as serial:
+                    transport=CandidateTransport(serial,self.gate,self.journal,self.bus_lock,
+                                                 self.serial_resolver,self.exclusivity,shutdown=self.shutdown)
+                    if self.enrollment_identity is not None and not self.journal.blocked():
+                        identity=self.enrollment_identity
+                        raw=transport._exchange(bytes((0x10,0x5B,old_address,(0x5B+old_address)&255,0x16)))
+                        from address_response import readback_address
+                        if (readback_address(raw,identity)!=old_address or
+                                self.exclusivity(identity,self.serial_resolver(identity),raw) is not True):
+                            raise ValueError('fresh primary identity qualification failed')
+                        self.registry.enroll_identity(meter_id,identity,exclusive=True,confirmed=True,physical_address=old_address)
+                    # Controller runs inside this already-owned nonrecursive lease.
+                    from contextlib import nullcontext
+                    controller=AddressController(self.registry,self.journal,nullcontext(),transport)
+                    result=operation(controller)
+                    self.destination_evidence=controller.destination_evidence
+                    self.failed=self.failed or controller.failed
+                return result
+            except Exception:
+                self.failed=True
+                raise
+            finally:
+                try:
+                    self.gate.invalidate_primary_probe()
+                except Exception:
+                    self.failed=True
+                    raise
+
+    def change(self,meter_id,new_address,*,expected_old,confirmed=False,
+               override=False,accepted_risk=None,resolve_conflict=False):
+        self.admission.require(meter_id,expected_old,new_address,confirmed=confirmed,
+                               override=override,accepted_risk=accepted_risk)
+        if self.failed or resolve_conflict is not False:
+            raise ValueError("first-write transaction unavailable")
+        return self._execute(lambda controller: controller.change(
+            meter_id,new_address,expected_old=expected_old,confirmed=True),
+            meter_id,expected_old)
+
+    def recover(self,*,expected_meter=None,expected_transaction=None):
+        # Recovery does not enable writing, even if the config switch is off.
+        intent=self.journal.load()
+        if (intent is None or intent.identity.meter_id!=expected_meter
+                or self.journal.transaction_id()!=expected_transaction):
+            return "recovery_required"
+        result=self._execute(lambda controller: controller.recover(
+            expected_meter=expected_meter,expected_transaction=expected_transaction),
+            expected_meter,intent.old_address)
+        if result in ("verified_old","verified_new"):
+            self.failed=False
+        return result
+
+    def enroll_quarantined_peer(self,*args,**kwargs):
+        raise ValueError("quarantine enrollment not enabled in first-write beta")
+
+    def verify_quarantine(self,*args,**kwargs):
+        raise ValueError("quarantine operations not enabled in first-write beta")
+
+
 def enroll_verified_identity(registry, transport, bus_lock, meter_id, address, *,
                              expected_identity, bindings, verify_exclusivity, confirmed=False):
     """Read-only physical enrollment candidate; no default evidence provider.

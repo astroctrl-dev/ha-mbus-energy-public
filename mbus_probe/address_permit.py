@@ -52,8 +52,9 @@ class FreshAddressPermit(AddressPermit):
     Fresh authorization is restricted to the journal creator and consumed durably.
     Actual exclusive selection proof must be integrated before live use.
     """
-    def __init__(self, journal, intent, *, bus_lock, serial_number=None):
+    def __init__(self, journal, intent, *, bus_lock, serial_number=None, shutdown=None):
         super().__init__(journal, intent, bus_lock=bus_lock, serial_number=serial_number)
+        self.shutdown = shutdown
         if not journal.fresh_write_available(intent):
             raise AddressSafetyBlocked('no fresh write authorization')
         self._write_frames = {selected_address_record(intent.new_address),
@@ -62,6 +63,8 @@ class FreshAddressPermit(AddressPermit):
 
     def check(self, frame):
         super().check(frame)
+        if frame in self._write_frames and self.shutdown is not None and self.shutdown.is_set():
+            raise AddressSafetyBlocked('shutdown requested; physical address write blocked')
         if frame in self._write_frames and not self._journal.fresh_write_available(self._intent):
             raise AddressSafetyBlocked('write authorization unavailable')
 
@@ -70,6 +73,12 @@ class FreshAddressPermit(AddressPermit):
         if frame in self._write_frames:
             self._journal.claim_write(self._intent)
             self._allowed.difference_update(self._write_frames)
+            # The durable claim may itself block. Recheck before returning to TX.
+            self.check_shutdown_before_transmit(frame)
+
+    def check_shutdown_before_transmit(self, frame):
+        if frame in self._write_frames and self.shutdown is not None and self.shutdown.is_set():
+            raise AddressSafetyBlocked('shutdown requested after durable claim; recover without rewriting')
 
 
 class QuarantineProbePermit:

@@ -1,4 +1,25 @@
 configuration:
+  allow_address_write:
+    name: "Tillat eksperimentell adresseskriving"
+    description: "Aktiver kun for separat godkjent betatest med én isolert måler; fysisk protokoll er ennå ikke verifisert."
+  address_test_isolated:
+    name: "Isolert testbuss"
+    description: "Bekreft nøyaktig én fysisk måler og én master, ikke bare én registrert måler."
+  address_test_meter_id:
+    name: "Måler-ID"
+    description: "Oppgi åtte sifre fra uavhengig bekreftet instrumentidentifikasjon."
+  address_test_manufacturer:
+    name: "Produsent"
+    description: "Oppgi produsentkoden på tre bokstaver."
+  address_test_version:
+    name: "Instrumentversjon"
+    description: "Oppgi verifisert numerisk versjonsbyte."
+  address_test_medium:
+    name: "Medium"
+    description: "Oppgi verifisert numerisk mediumbyte."
+  address_test_device_number:
+    name: "Fabrikasjonsnummer"
+    description: "Oppgi åttesifret nummer bekreftet uavhengig på instrumentet."
   allow_address_diagnostic:
     name: "Tillat adresseprotokolldiagnostikk"
     description: "Aktiver isolert, skrivebeskyttet protokolltest kun etter godkjenning."

@@ -229,6 +229,9 @@ def run(config, client, registry=None, bus_lock=None, history_controller=None,
             client.publish(BRIDGE_AVAILABILITY, 'offline', qos=1, retain=True)
             STOP.wait(5)
             continue
+        if config.get("_address_change_busy",lambda:False)():
+            STOP.wait(1)
+            continue
         if history_controller and history_controller.blocked.is_set():
             client.publish(BRIDGE_AVAILABILITY, "offline", qos=1, retain=True)
             if history_controller.recover_normal():
@@ -291,7 +294,8 @@ def run(config, client, registry=None, bus_lock=None, history_controller=None,
                         with registry.lock:
                             if registry.selected.get(row["meter_id"]) != row["address"]:
                                 continue
-                    if config.get("_address_scan_busy",lambda:False)():
+                    if (config.get("_address_scan_busy",lambda:False)()
+                            or config.get("_address_change_busy",lambda:False)()):
                         continue
                     priority = timing is not None and row["meter_id"] not in attempted_meters
                     tolerance = slot_tolerance(config.get('read_before_full_hour', False), target)
@@ -405,8 +409,9 @@ def main():
     config["_frame5_layout_approved"] = True
     config["_diagnostic_runtime"] = DiagnosticRuntime(
         root="/data/analysis" if config.get("_frame5_layout_approved") is True else None)
-    from address_runtime import build_read_only_jobs
+    from address_runtime import build_read_only_jobs, build_experimental_change_job
     address_search_job, address_change_job = build_read_only_jobs(config,registry,timing,bus_lock,STOP)
+    address_change_job = build_experimental_change_job(config,registry,timing,journal,bus_lock,STOP)
     def diagnostic_factory(admission,history_blocked):
         from address_diagnostic_job import AddressDiagnosticJob
         from address_runtime import run_isolated_diagnostic
@@ -418,6 +423,8 @@ def main():
                                     (history_controller.blocked.is_set() and not history_controller.startup_pending))
     config["_address_test_busy"] = address_search_job.test_reservation.busy
     config["_address_scan_busy"] = address_search_job.busy
+    config["_address_change_busy"] = lambda: (address_change_job is not None and
+                                              address_change_job.snapshot()["status"] == "running")
     server = serve(registry, config, client, bus_lock, STOP, raw_log=raw_log,
                    address_diagnostic_factory=diagnostic_factory,
                    address_search_job=address_search_job, address_change_job=address_change_job,
@@ -431,10 +438,16 @@ def main():
         run(config, client, registry, bus_lock, server.history_controller, None,
             valid_round, timing=timing)
     finally:
+        STOP.set()
         try:
             server.shutdown()
-            for row in registry.snapshot()["selected"]:
-                mark_unavailable(client, row["meter_id"]).wait_for_publish(timeout=5)
+            if address_change_job is not None and not address_change_job.wait_for_shutdown(timeout=5):
+                logging.getLogger("mbus.service").warning(
+                    "Address worker still active; preserving durable recovery state")
+                # Registry may still be owned by the worker. Avoid a blocking snapshot.
+            else:
+                for row in registry.snapshot()["selected"]:
+                    mark_unavailable(client, row["meter_id"]).wait_for_publish(timeout=5)
             client.publish(BRIDGE_AVAILABILITY, "offline", qos=1, retain=True).wait_for_publish(timeout=5)
         finally:
             client.disconnect()

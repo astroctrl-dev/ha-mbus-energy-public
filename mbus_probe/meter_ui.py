@@ -100,7 +100,7 @@ function syncRisk() {
   const next = row && row.meter_id===addressMeter && row.old_address===addressOld && row.new_address===target ? row : null;
   if(JSON.stringify(next)!==JSON.stringify(displayedRisk)) document.getElementById('address-override').checked=false;
   displayedRisk=next;
-  document.getElementById('address-override').disabled=!next;
+  document.getElementById('address-override').disabled=true;
   document.getElementById('address-risk').textContent=next?'Destination '+addressFormat(next.new_address)+' — '+(addressLabels[next.status]||next.status)+'; registered peers: '+next.registered_peers.length:'';
 }
 function updateAddressHeader() {
@@ -143,8 +143,8 @@ function syncAddressRequest() {
   else if(target===addressOld) {msg='Selected address is used by the current instrument.';fg='#166534';}
   else if(busy && addressJob?.total===1) label='Checking address…';
   else if(row && row.address===target) {
-    if(row.status==='no_response' && JSON.stringify(row.observations)===JSON.stringify(['no_response','no_response'])) {requestActionMode='accept';label='Accept new address';bg='#15803d';fg='#166534';msg='Both checks completed. No response detected. Physical address writing is disabled in this beta.';}
-    else if(['occupied','ambiguous','occupied_multiple'].includes(row.status) && !row.known_meter_count && row.observations?.length) {requestActionMode='override';label='Override conflict';bg='#facc15';fg='#92400e';msg='Warning: possible address conflict. Physical address writing is disabled in this beta.';}
+    if(row.status==='no_response' && JSON.stringify(row.observations)===JSON.stringify(['no_response','no_response'])) {requestActionMode='accept';label='Accept new address';bg='#15803d';fg='#166534';msg=addressChangeEnabled?'Both checks completed. No response detected. Confirm experimental address change; destination and identity will be checked again.':'Both checks completed. No response detected. Physical address writing is disabled in this beta.';}
+    else if(['occupied','ambiguous','occupied_multiple'].includes(row.status) && !row.known_meter_count && row.observations?.length) {requestActionMode='override';label='Override conflict';bg='#facc15';fg='#92400e';msg=addressChangeEnabled?'Possible conflict: physical writing is blocked.':'Warning: possible address conflict. Physical address writing is disabled in this beta.';if(addressChangeEnabled){blocked=true;label='Address not allowed';}}
     else {label='Address not allowed';blocked=true;fg='#b91c1c';msg='The selected address cannot be used.';}
   }
   const acknowledgementKey=row?JSON.stringify([addressMeter,addressOld,target,requestEvidenceId,row]):null;
@@ -187,7 +187,7 @@ function renderAddressJob(job) {
   if(matching && !stale && job.phase==='finalizing') document.getElementById('address-progress').textContent='Finishing scan safety checks';
   if(matching && !stale && job.phase==='known') document.getElementById('address-progress').textContent='Verifying registered instruments – '+job.results.length+'/'+job.total;
   if(matching && !stale && job.guard_remaining>0) document.getElementById('address-progress').textContent+=' · Waiting before resuming normal readings – '+job.guard_remaining+' s';
-  const key = JSON.stringify([addressMeter,rows,matching,job.total,stale,job.test]);
+  const key = JSON.stringify([addressMeter,addressOld,rows,matching,job.total,stale,job.test,job.status,reserved]);
   if (key === addressView) return;
   addressView = key;
   area.replaceChildren();
@@ -197,7 +197,9 @@ function renderAddressJob(job) {
   for(const n of addresses) {
     const row=byAddress.get(n)||{status:'pending'};
     const choice=addressChoice(row.status);
-    if(job.test) choice.selectable=false;
+    // Test evidence can propose a destination only after full completion and cooldown.
+    // It never authorizes a write; the separate targeted checks remain mandatory.
+    if(job.test && (job.status!=='completed'||reserved||n===addressOld)) choice.selectable=false;
     const label=addressFormat(n)+' — '+(addressLabels[row.status]||row.status)+(row.observed_identity?.meter_id?' · ID '+row.observed_identity.meter_id:'');
     const cell=button(addressFormat(n),()=>{
       if(!choice.selectable) return;
@@ -251,8 +253,9 @@ function renderAddressChange(state) {
   quarantineRecoveryPending=recovery;
   renderQuarantine(quarantineRows,quarantineEnabled);
   if(job?.action) document.getElementById('quarantine-status').textContent=job.meter_id+' — '+job.status;
-  document.getElementById('address-write-panel').hidden=!addressChangeEnabled;
+  document.getElementById('address-write-panel').hidden=true;
   document.getElementById('address-write-disabled').hidden=addressChangeEnabled;
+  syncAddressRequest();
   const searchBusy=['running','stopping'].includes(state.address_search?.status);
   const quarantined=quarantineRows.length>0;
   document.getElementById('address-change').disabled=addressChangeBusy||searchBusy||recovery||quarantined;
@@ -277,12 +280,13 @@ document.getElementById('address-change').onclick=async()=>{
   const input=document.getElementById('address-target');
   if(!addressChangeEnabled||addressChangeBusy||quarantineRows.length||quarantineRecoveryPending||!addressMeter||!validAddressInput(input)) return;
   const target=Number(input.value), override=document.getElementById('address-override').checked;
-  if(target===addressOld || (override && !displayedRisk)) return;
+  if(target===addressOld || override || requestActionMode!=='accept' || document.getElementById('address-check').disabled) return;
   if(!confirm('Change meter '+addressMeter+' from '+addressFormat(addressOld)+' to '+addressFormat(target)+'? The destination will be checked again. '+(override?'You explicitly accept destination conflict or uncertainty.':'Conflicting or uncertain destinations will stop the operation.'))) return;
+  addressChangeBusy=true;syncAddressRequest();
   document.getElementById('address-change').disabled=true;
   document.getElementById('address-override').checked=false;
-  try {await call('/api/address_change',{meter_id:addressMeter,old_address:addressOld,new_address:target,confirm:true,override,accepted_risk:override?displayedRisk:null}); await refresh();}
-  catch(e){document.getElementById('error').textContent=e.message;}
+  try {const job=await call('/api/address_change',{meter_id:addressMeter,old_address:addressOld,new_address:target,confirm:true,override:false,accepted_risk:null}); resetAddressRequest();renderAddressChange({address_change_enabled:addressChangeEnabled,address_change:job,address_search:addressJob}); await refresh();}
+  catch(e){document.getElementById('error').textContent=e.message;try {await refresh();} catch(_) { /* keep blocked until status refresh */ }}
 };
 function updateFastWarning() {
   document.getElementById('address-fast-warning').hidden=!document.getElementById('address-fast').checked;
@@ -321,6 +325,8 @@ document.getElementById('address-close').onclick=()=>{
 document.getElementById('address-check').onclick=()=>{
   const action=document.getElementById('address-check');
   if(action.disabled) return;
+  if(addressChangeEnabled && requestActionMode==='accept') return document.getElementById('address-change').onclick();
+  if(addressChangeEnabled && requestActionMode==='override') return;
   if(['accept','override'].includes(requestActionMode)){
     if(confirm(requestActionMode==='override'?'A conflict may exist. Confirm test acknowledgement only? No physical address change is enabled.':'Confirm test acknowledgement only? No physical address change is enabled.')){
       acknowledgedRequest=JSON.stringify([addressMeter,addressOld,Number(document.getElementById('address-target').value),requestEvidenceId,addressJob.results[0]]);
@@ -711,7 +717,7 @@ async function downloadProtocolEvidence(){
     const response=await fetch(root+'/api/address_diagnostic_evidence/'+encodeURIComponent(name));
     if(!response.ok)throw new Error('Evidence unavailable');
     const url=URL.createObjectURL(await response.blob());const link=document.createElement('a');
-    link.href=url;link.download=name;document.body.append(link);link.click();link.remove();
+    link.href=url;link.download=name.replace(/\.jsonl$/,'.txt');document.body.append(link);link.click();link.remove();
     setTimeout(()=>URL.revokeObjectURL(url),60000);
   }catch(e){pdEl('error').textContent=e.message;}
 }
@@ -761,6 +767,11 @@ def render_page(language):
     prefix = "const displayText = " + json.dumps(display, ensure_ascii=True).replace("<", "\\u003c") + ";\n"
     prefix += "const localText = value => Object.prototype.hasOwnProperty.call(displayText, value) ? displayText[value] : value;\n"
     return html + "<script>" + prefix + script
+
+
+def address_recovery_history_blocked(history):
+    """Startup verification must wait for pending address reconciliation."""
+    return history.marker.exists() or (history.blocked.is_set() and not history.startup_pending)
 
 
 def serve(registry, config, client, bus_lock, stop, port=8099, history_controller=None, clock_controller=None, raw_log=None, address_search_job=None, address_change_job=None, address_safety_blocked=None, address_diagnostic_factory=None):
@@ -878,8 +889,8 @@ def serve(registry, config, client, bus_lock, stop, port=8099, history_controlle
                     self._send(404,{"error":"evidence unavailable"})
                     return
                 self.send_response(200)
-                self.send_header("Content-Type","application/x-ndjson")
-                self.send_header("Content-Disposition",'attachment; filename="'+name+'"')
+                self.send_header("Content-Type","text/plain; charset=utf-8")
+                self.send_header("Content-Disposition",'attachment; filename="'+name.removesuffix(".jsonl")+'.txt"')
                 self.send_header("Cache-Control","no-store")
                 self.send_header("Content-Length",str(len(payload)))
                 self.end_headers()
@@ -1010,7 +1021,7 @@ def serve(registry, config, client, bus_lock, stop, port=8099, history_controlle
                 self._send(202, address_change_job.snapshot())
                 return
             if route == "address_recover":
-                if address_change_job is None or history_controller.blocked.is_set():
+                if address_change_job is None or address_recovery_history_blocked(history_controller):
                     raise ValueError("address recovery unavailable")
                 address_change_job.recover(meter_id, data.get("transaction_id"), confirmed=data.get("confirm"))
                 self._send(202, address_change_job.snapshot())

@@ -7,19 +7,20 @@ the calling controller for the entire operation.
 from address_controller import Proof
 from address_policy import assess_destination, validate_address, SecondaryIdentity
 from address_permit import AddressPermit, FreshAddressPermit, QuarantineProbePermit, QuarantineEnrollmentPermit, PendingPrimaryPermit
-from address_response import clean_ack, readback_address, receive_window
+from address_response import clean_ack, readback_address, receive_window, reported_device_number
 from address_telegrams import deselect, select_enhanced, selected_read, selected_address_record
 from raw_telegram_log import capture
 
 
 class CandidateTransport:
-    def __init__(self, serial, gate, journal, bus_lock, serial_resolver, exclusivity):
+    def __init__(self, serial, gate, journal, bus_lock, serial_resolver, exclusivity, *, shutdown=None):
         self.serial, self.gate, self.journal = serial, gate, journal
         self.bus_lock = bus_lock
         if not callable(serial_resolver) or not callable(exclusivity):
             raise ValueError('instrument-specific evidence providers required')
         self.serial_resolver = serial_resolver
         self.exclusivity = exclusivity
+        self.shutdown = shutdown
         self.proof = None
         self.permit = None
         self.selected = False
@@ -37,12 +38,23 @@ class CandidateTransport:
 
     def _exchange(self, frame, permit=None):
         self._locked()
-        self.serial.reset_input_buffer()
-        if self.gate.write(self.serial, frame, permit=permit) != len(frame):
-            raise OSError("partial transmission")
-        response = receive_window(self.serial)
-        capture("RX", response)
-        return response
+        try:
+            if self.serial.in_waiting:
+                raise ValueError("unexpected buffered input before address exchange")
+            if self.gate.write(self.serial, frame, permit=permit, defer_completion=True,
+                               reject_buffered=True) != len(frame):
+                raise OSError("partial transmission")
+            response = receive_window(self.serial)
+            capture("RX", response)
+            return response
+        except Exception:
+            # Reject this exchange; discard residual bytes only after failure.
+            # A subsequent recovery must establish fresh selection and proof.
+            self.serial.reset_input_buffer()
+            raise
+        finally:
+            # A process crash before this point retains durable unknown timing.
+            self.gate.complete_address_exchange()
 
     def check(self, address):
         address = validate_address(address)
@@ -106,11 +118,12 @@ class CandidateTransport:
             raise ValueError("selection not acknowledged cleanly")
         raw = self._exchange(selected_read(0x7B), self.permit)
         address = readback_address(raw, identity)
-        exclusive = self.exclusivity(identity, serial_number, raw) is True
+        exclusive = (reported_device_number(raw, identity) == serial_number
+                     and self.exclusivity(identity, serial_number, raw) is True)
         self.proof = Proof(identity, address, exclusive)
         if fresh and self.proof.matches(identity, intent.old_address):
             self.permit.close()
-            self.permit = FreshAddressPermit(self.journal, intent, bus_lock=self.bus_lock, serial_number=serial_number)
+            self.permit = FreshAddressPermit(self.journal, intent, bus_lock=self.bus_lock, serial_number=serial_number, shutdown=self.shutdown)
         return self.proof
 
     def select(self, identity):

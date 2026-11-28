@@ -1,4 +1,25 @@
 configuration:
+  allow_address_write:
+    name: "Allow experimental address writing"
+    description: "Enable only for a separately approved isolated single-meter beta test; physical protocol behavior is not yet verified."
+  address_test_isolated:
+    name: "Isolated test bus"
+    description: "Confirm exactly one physical meter and one master, not merely one registered meter."
+  address_test_meter_id:
+    name: "Meter ID"
+    description: "Enter eight digits from independently verified instrument identification."
+  address_test_manufacturer:
+    name: "Manufacturer"
+    description: "Enter the three-letter manufacturer code."
+  address_test_version:
+    name: "Instrument version"
+    description: "Enter the verified numeric version byte."
+  address_test_medium:
+    name: "Medium"
+    description: "Enter the verified numeric medium byte."
+  address_test_device_number:
+    name: "Device number"
+    description: "Enter the eight-digit number independently confirmed on the instrument."
   allow_address_diagnostic:
     name: "Allow address protocol diagnostic"
     description: "Enable the isolated read-only protocol test only after approval."

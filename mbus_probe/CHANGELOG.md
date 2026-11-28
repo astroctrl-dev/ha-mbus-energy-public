@@ -1,3 +1,10 @@
+## v3.0.0-beta.10
+
+- Experimental address-write runtime for an explicitly attested isolated single-meter test bus. Disabled by default. Requires independently entered instrument identity and device number, fresh matching response, conservative destination checks, single write attempt and journal-based read-only recovery. Physical protocol behavior remains unverified; do not use on a shared bus.
+- Export diagnostic evidence as plain-text TXT while retaining its internal JSONL format.
+
+- Allow destination selection from completed discovery test results after the safety cooldown. Current and unresolved addresses remain disabled; selecting a destination does not authorize a physical write. Separate destination checks remain required. Fast scan behavior is unchanged.
+
 ## v3.0.0-beta.9
 
 - Experimental Fast scan continues to the next distinct address after a bounded receive window, including ambiguous replies; record anomalies for deferred rechecks. In discovery test mode, a clean full pass needs no repeated identity scan; if anomalies require rechecks, check the current address first. Preserve same-address 60-second cooldown, conservative transport-failure handling, standard search and exit protection. Physical address writing remains disabled.

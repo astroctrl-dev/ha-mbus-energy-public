@@ -199,6 +199,13 @@ class BusTiming:
         with self.lock:
             self._persist_resume(self.monotonic())
 
+    def complete_address_exchange(self):
+        """Conservative full guard from bounded RX completion, including errors."""
+        with self.lock:
+            completed = self.monotonic()
+            self.eligible = max(self.eligible, completed + MIN_INTERVAL)
+            self._persist_resume(completed)
+
     def complete_primary_probe(self, address, raw, *, fast_response=False):
         # Fast discovery records the completed bounded receive window even
         # when its bytes are ambiguous. Classification/rechecks are separate.
@@ -218,7 +225,7 @@ class BusTiming:
                 return True
             return False
 
-    def write(self, serial, frame, *, permit=None, _primary_probe=None, _probe_interval=PRIMARY_PROBE_INTERVAL, _probe_quiet=0.0, defer_completion=False, scan_transition=False, normal_address=None):
+    def write(self, serial, frame, *, permit=None, _primary_probe=None, _probe_interval=PRIMARY_PROBE_INTERVAL, _probe_quiet=0.0, defer_completion=False, scan_transition=False, normal_address=None, reject_buffered=False):
         attempted = False
         written = None
         try:
@@ -248,7 +255,7 @@ class BusTiming:
                 self._pending_probe = None
                 while self.monotonic() < eligible:
                     self.sleep(eligible - self.monotonic())
-                if _primary_probe is not None and _probe_quiet and serial.in_waiting:
+                if (reject_buffered or (_primary_probe is not None and _probe_quiet)) and serial.in_waiting:
                     self.eligible=max(self.eligible,self.monotonic()+MIN_INTERVAL)
                     raise ValueError('unexpected buffered input after guard wait')
                 self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -278,6 +285,14 @@ class BusTiming:
                 LOG.info("M-Bus TX ready: %d bytes", len(frame))
                 if permit is not None:
                     permit.consume(frame)
+                if reject_buffered and serial.in_waiting:
+                    self.eligible=max(self.eligible,self.monotonic()+MIN_INTERVAL)
+                    raise ValueError('unexpected buffered input after authorization')
+                # The serial buffer query above can block. Check STOP again
+                # after it, immediately before the physical mutation.
+                from address_permit import FreshAddressPermit
+                if type(permit) is FreshAddressPermit:
+                    permit.check_shutdown_before_transmit(frame)
                 attempted = True
                 try:
                     written = serial.write(frame)

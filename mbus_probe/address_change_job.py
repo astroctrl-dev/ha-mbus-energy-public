@@ -9,11 +9,28 @@ from address_policy import validate_address
 
 
 class AddressChangeJob:
-    def __init__(self, controller, shutdown):
+    def __init__(self, controller, shutdown, *, first_write_admission=None):
         self.controller, self.shutdown = controller, shutdown
+        self.first_write_admission = first_write_admission
         self.lock = threading.Lock()
+        self.worker = None
         self.state = {"status": "idle", "meter_id": None, "old_address": None,
                       "new_address": None}
+
+    def wait_for_shutdown(self, timeout=5):
+        """Bound shutdown; never clear a pending journal on timeout."""
+        self.shutdown.set()
+        with self.lock:
+            worker = self.worker
+        if worker is None:
+            return True
+        worker.join(timeout)
+        return not worker.is_alive()
+
+    def _start_worker(self, target, args):
+        worker = threading.Thread(target=target, args=args, daemon=True)
+        worker.start()
+        self.worker = worker
 
     def snapshot(self):
         with self.lock:
@@ -35,6 +52,9 @@ class AddressChangeJob:
         validate_address(new_address)
         if not isinstance(meter_id, str) or confirmed is not True or type(override) is not bool:
             raise ValueError("explicit confirmation required")
+        if self.first_write_admission is not None:
+            self.first_write_admission.require(meter_id, old_address, new_address, confirmed=confirmed,
+                                               override=override, accepted_risk=accepted_risk)
         with self.lock:
             if self.shutdown.is_set() or self.state["status"] == "running" or self.controller.journal.blocked():
                 raise ValueError("address operation unavailable")
@@ -48,14 +68,16 @@ class AddressChangeJob:
             self.state = {"status": "running", "operation_id": str(uuid.uuid4()), "meter_id": meter_id,
                           "old_address": old_address, "new_address": new_address}
             try:
-                threading.Thread(target=self._run, args=(meter_id, old_address, new_address, override, accepted_risk),
-                                 daemon=True).start()
+                self._start_worker(self._run, (meter_id, old_address, new_address, override, accepted_risk))
             except RuntimeError as exc:
                 self.state["status"]="start_failed"
                 raise ValueError("address worker could not start") from exc
 
     def _run(self, meter_id, old, new, override, accepted_risk):
         try:
+            if self.first_write_admission is not None:
+                self.first_write_admission.require(meter_id, old, new, confirmed=True,
+                                                   override=override, accepted_risk=accepted_risk)
             status = self.controller.change(meter_id, new, expected_old=old,
                                             confirmed=True, override=override, accepted_risk=accepted_risk)
         except Exception:
@@ -79,7 +101,7 @@ class AddressChangeJob:
             self.state = {"status": "running", "operation_id": str(uuid.uuid4()), "meter_id": meter_id,
                           "old_address": intent.old_address, "new_address": intent.new_address}
             try:
-                threading.Thread(target=self._recover, args=(meter_id, transaction_id), daemon=True).start()
+                self._start_worker(self._recover, (meter_id, transaction_id))
             except RuntimeError as exc:
                 self.state["status"]="recovery_required"
                 raise ValueError("recovery worker could not start") from exc
@@ -99,6 +121,8 @@ class AddressChangeJob:
         if confirmed is not True or not isinstance(meter_id,str) or action not in ("enroll","verify","relocate"):
             raise ValueError("explicit quarantine action required")
         if action == "relocate":
+            if self.first_write_admission is not None:
+                raise ValueError("conflict relocation disabled in first-write beta")
             validate_address(new_address)
             if new_address == address:
                 raise ValueError("new address must differ")
@@ -110,8 +134,7 @@ class AddressChangeJob:
             self.state={"status":"running","operation_id":str(uuid.uuid4()),"meter_id":meter_id,
                         "old_address":address,"new_address":new_address,"action":action}
             try:
-                threading.Thread(target=self._quarantine_action,args=(meter_id,address,action,new_address),
-                                 daemon=True).start()
+                self._start_worker(self._quarantine_action, (meter_id,address,action,new_address))
             except RuntimeError as exc:
                 self.state["status"]="quarantine_required"
                 raise ValueError("quarantine worker could not start") from exc

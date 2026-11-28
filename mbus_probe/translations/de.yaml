@@ -1,4 +1,25 @@
 configuration:
+  allow_address_write:
+    name: "Experimentelle Adressänderung erlauben"
+    description: "Nur für einen separat freigegebenen isolierten Einzelzählertest aktivieren; das physische Protokoll ist noch nicht verifiziert."
+  address_test_isolated:
+    name: "Isolierter Testbus"
+    description: "Genau einen physischen Zähler und einen Master bestätigen, nicht nur einen registrierten Zähler."
+  address_test_meter_id:
+    name: "Zähler-ID"
+    description: "Acht Ziffern aus unabhängig bestätigter Geräteidentifikation eingeben."
+  address_test_manufacturer:
+    name: "Hersteller"
+    description: "Dreibuchstabigen Herstellercode eingeben."
+  address_test_version:
+    name: "Geräteversion"
+    description: "Verifiziertes numerisches Versionsbyte eingeben."
+  address_test_medium:
+    name: "Medium"
+    description: "Verifiziertes numerisches Mediumbyte eingeben."
+  address_test_device_number:
+    name: "Fabrikationsnummer"
+    description: "Achtstellige, unabhängig am Gerät bestätigte Nummer eingeben."
   allow_address_diagnostic:
     name: "Adressprotokolldiagnose erlauben"
     description: "Isolierten Protokolltest ohne dauerhafte Schreibbefehle nur nach Freigabe aktivieren."
